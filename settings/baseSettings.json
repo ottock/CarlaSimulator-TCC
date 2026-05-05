@@ -1,0 +1,82 @@
+{
+    "carla_client": {
+        "host": "localhost",
+        "port": 2000,
+        "timeout": 10.0,
+        "max_retries": 3,
+        "retry_delay": 2
+    },
+
+    "world": {
+        "map_name": "Town01",
+        "seed": 42,
+
+        "actor_vehicle": {
+            "enabled": true,
+            "vehicle_filter": "vehicle.tesla.model3",
+            "spawn_index": 0,
+            "use_lidar": true,
+            "use_camera": true,
+            "lidar": {
+                "channels": 32,
+                "points_per_second": 100000,
+                "rotation_frequency": 10,
+                "range": 100,
+                "upper_fov": 15,
+                "lower_fov": -25
+            }
+        },
+
+        "settings": {
+            "synchronous_mode": true,
+            "fixed_delta_seconds": 0.05,
+            "no_rendering_mode": false,
+            "substepping": true,
+            "max_substep_delta_time": 0.01,
+            "max_substeps": 10,
+
+            "deterministic_ragdolls": true,
+            "actor_active_distance": 2000.0,
+            "tile_stream_distance": 3000.0,
+            "spectator_as_ego": false
+        },
+
+        "weather": {
+            "cloudiness": 80.0,
+            "precipitation": 30.0,
+            "precipitation_deposits": 50.0,
+            "wind_intensity": 20.0,
+            "sun_azimuth_angle": 45.0,
+            "sun_altitude_angle": 30.0,
+            "fog_density": 10.0,
+            "fog_distance": 50.0,
+            "wetness": 70.0,
+
+            "scattering_intensity": 0.5,
+            "mie_scattering_scale": 0.03,
+            "rayleigh_scattering_scale": 0.0331,
+            "dust_storm": 0.0
+        },
+
+        "traffic_manager": {
+            "port": 8000,
+            "synchronous_mode": true,
+            "hybrid_physics_mode": true,
+            "hybrid_physics_radius": 50.0,
+            "global_distance": 3.0,
+            "speed_difference": 0
+        },
+
+        "traffic": {
+            "vehicle_count": 30,
+            "vehicle_filter": "vehicle.*",
+            "auto_lane_change": false
+        },
+
+        "pedestrians": {
+            "count": 20,
+            "running_percentage": 10,
+            "crossing_percentage": 20
+        }
+    }
+}

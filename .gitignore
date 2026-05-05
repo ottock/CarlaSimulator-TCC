@@ -1,0 +1,37 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data and Models (can be large)
+data/*
+!data/.gitkeep
+models/*
+!models/.gitkeep
+
+# CARLA specific
+CarlaUE4/
+Carla_*/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+log/
+github/
