@@ -45,18 +45,25 @@ CarlaSimulator-TCC/
     └── CarlaUE4.exe
 ```
 
-### 3. Crie e ative o ambiente virtual
+### 3. Crie o ambiente virtual e instale as dependências
+
+Execute o script de setup na raiz do projeto:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
+scripts\createVenv.bat
 ```
 
-### 4. Instale as dependências Python
+Este script automaticamente:
+1. Cria o ambiente virtual `.venv`
+2. Ativa o ambiente
+3. Instala todas as dependências do `requirements.txt`
 
-```bash
-pip install -r requirements.txt
-```
+> **Alternativa manual** (se o script não funcionar):
+> ```bash
+> python -m venv .venv
+> .venv\Scripts\activate
+> pip install -r requirements.txt
+> ```
 
 O arquivo `requirements.txt` instala:
 
