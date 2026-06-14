@@ -1,25 +1,17 @@
 #!/usr/bin/env python3
 """
-COIN-D6 LiDAR Test Script para Jetson Nano
-============================================
-Testa o LiDAR COIN-D6 (Guoke Optoelectronics) via USB serial (CH340).
+COIN-D6 LiDAR — Visualizador Pygame
+=====================================
+Mostra o scan 360° do COIN-D6 em tempo real com interface grafica.
 
-COMO CONECTAR:
-  1. Plugue o adaptador CH340 USB no Jetson Nano
-  2. O LiDAR deve comecar a girar automaticamente ao receber 5V pelo USB
-  3. Rode: sudo python3 coin_d6_test.py
+Requisitos:
+  sudo pip3 install pyserial pygame
 
-MODOS:
-  python3 coin_d6_test.py                  # Auto-detecta porta e mostra scan
-  python3 coin_d6_test.py --port /dev/ttyUSB0  # Porta especifica
-  python3 coin_d6_test.py --raw             # Modo hex dump (debug)
-  python3 coin_d6_test.py --csv 30          # Grava 30s de dados em CSV
-
-PROTOCOLO (do manual):
-  Baud rate: 230400
-  Start:  AA 55 F0 0F
-  Stop:   AA 55 F5 0A
-  Fios:   Amarelo=5V, Branco=GND, Vermelho=TXD, Preto=RXD
+Uso:
+  sudo python3 coin_d6_visual.py
+  sudo python3 coin_d6_visual.py --port /dev/ttyUSB0
+  sudo python3 coin_d6_visual.py --range 4.0
+  sudo python3 coin_d6_visual.py --fullscreen
 """
 
 import sys
@@ -33,14 +25,19 @@ import os
 try:
     import serial
 except ImportError:
-    print("[ERRO] pyserial nao encontrado.")
-    print("       Instale com: pip3 install pyserial")
-    print("       No Jetson:   sudo pip3 install pyserial")
+    print("[ERRO] pyserial nao encontrado: sudo pip3 install pyserial")
+    sys.exit(1)
+
+try:
+    import pygame
+    import pygame.gfxdraw
+except ImportError:
+    print("[ERRO] pygame nao encontrado: sudo pip3 install pygame")
     sys.exit(1)
 
 
 # ============================================================
-# Constantes do protocolo COIN-D6
+# Protocolo COIN-D6
 # ============================================================
 BAUD_RATE = 230400
 CMD_START = bytes([0xAA, 0x55, 0xF0, 0x0F])
@@ -48,130 +45,60 @@ CMD_STOP  = bytes([0xAA, 0x55, 0xF5, 0x0A])
 HEADER    = bytes([0xAA, 0x55])
 
 
-def find_serial_port():
-    """Auto-detecta a porta serial do CH340."""
-    patterns = [
-        '/dev/ttyUSB*',
-        '/dev/ttyACM*',
-        '/dev/serial/by-id/*CH340*',
-    ]
-    for pattern in patterns:
-        ports = glob.glob(pattern)
-        if ports:
-            return sorted(ports)[0]
-    return None
+# ============================================================
+# Cores
+# ============================================================
+BLACK      = (15, 15, 20)
+DARK_GRAY  = (30, 30, 38)
+MID_GRAY   = (55, 55, 65)
+LIGHT_GRAY = (120, 120, 135)
+WHITE      = (220, 220, 230)
+
+GREEN      = (0, 220, 100)
+CYAN       = (0, 200, 220)
+YELLOW     = (255, 210, 0)
+ORANGE     = (255, 130, 0)
+RED        = (255, 50, 50)
+BLUE       = (60, 120, 255)
+PURPLE     = (160, 80, 255)
+
+RING_COLOR    = (35, 45, 55)
+SECTOR_LINE   = (40, 40, 50)
+GRID_COLOR    = (25, 30, 38)
+
+# Gradiente por distancia (perto -> longe)
+DIST_COLORS = [
+    RED,        # < 1m
+    ORANGE,     # 1-2m
+    YELLOW,     # 2-3m
+    GREEN,      # 3-5m
+    CYAN,       # 5-8m
+    BLUE,       # 8-12m
+]
 
 
-def connect_lidar(port, timeout=2.0):
-    """Conecta ao LiDAR e envia comando de start."""
-    print(f"  Conectando em {port} @ {BAUD_RATE} baud...")
-    ser = serial.Serial(
-        port=port,
-        baudrate=BAUD_RATE,
-        bytesize=serial.EIGHTBITS,
-        parity=serial.PARITY_NONE,
-        stopbits=serial.STOPBITS_ONE,
-        timeout=timeout,
-    )
-
-    # Limpar buffer
-    ser.reset_input_buffer()
-    ser.reset_output_buffer()
-    time.sleep(0.1)
-
-    # Enviar comando de start
-    print(f"  Enviando comando START (AA 55 F0 0F)...")
-    ser.write(CMD_START)
-    time.sleep(0.5)
-
-    # Verificar se dados estao chegando
-    waiting = ser.in_waiting
-    if waiting > 0:
-        print(f"  [OK] Dados chegando! ({waiting} bytes no buffer)")
+def dist_to_color(distance_m):
+    """Retorna cor baseada na distancia."""
+    if distance_m < 1.0:
+        return DIST_COLORS[0]
+    elif distance_m < 2.0:
+        return DIST_COLORS[1]
+    elif distance_m < 3.0:
+        return DIST_COLORS[2]
+    elif distance_m < 5.0:
+        return DIST_COLORS[3]
+    elif distance_m < 8.0:
+        return DIST_COLORS[4]
     else:
-        print(f"  [!!] Nenhum dado recebido ainda. Aguardando...")
-        time.sleep(1.0)
-        waiting = ser.in_waiting
-        if waiting > 0:
-            print(f"  [OK] Dados chegando agora ({waiting} bytes)")
-        else:
-            print(f"  [!!] Sem dados. Verifique conexao e alimentacao 5V.")
-
-    return ser
-
-
-def stop_lidar(ser):
-    """Envia comando de stop."""
-    try:
-        ser.write(CMD_STOP)
-        time.sleep(0.1)
-        ser.close()
-        print("  LiDAR parado e porta fechada.")
-    except Exception:
-        pass
+        return DIST_COLORS[5]
 
 
 # ============================================================
-# Modo 1: Hex Dump (debug / descobrir protocolo)
-# ============================================================
-def run_hex_dump(ser, duration=10):
-    """Le bytes brutos e mostra hex dump para debug."""
-    print(f"\n  === MODO HEX DUMP ({duration}s) ===")
-    print(f"  Procurando por headers AA 55...\n")
-
-    start_time = time.monotonic()
-    total_bytes = 0
-    packet_count = 0
-
-    try:
-        while (time.monotonic() - start_time) < duration:
-            data = ser.read(256)
-            if not data:
-                continue
-
-            total_bytes += len(data)
-
-            # Mostrar hex com destaque nos headers
-            hex_str = ""
-            for i, b in enumerate(data):
-                if i < len(data) - 1 and data[i] == 0xAA and data[i+1] == 0x55:
-                    hex_str += f"\n  >>> HEADER >>> "
-                    packet_count += 1
-                hex_str += f"{b:02X} "
-
-            print(hex_str, end="", flush=True)
-
-    except KeyboardInterrupt:
-        pass
-
-    elapsed = time.monotonic() - start_time
-    print(f"\n\n  --- Resumo ---")
-    print(f"  Tempo:     {elapsed:.1f}s")
-    print(f"  Bytes:     {total_bytes}")
-    print(f"  Rate:      {total_bytes/elapsed:.0f} bytes/s")
-    print(f"  Headers:   {packet_count} pacotes AA 55 encontrados")
-
-
-# ============================================================
-# Modo 2: Parse de pacotes CSPC
+# Parser (mesmo do script anterior, validado)
 # ============================================================
 class CoinD6Parser:
-    """
-    Parser para o protocolo CSPC do COIN-D6.
-
-    Formato tipico de pacote CSPC:
-      [AA 55] [type] [sample_count] [start_angle_lo] [start_angle_hi]
-      [dados: distance_lo distance_hi intensity] * sample_count
-      [end_angle_lo] [end_angle_hi]
-      [timestamp_lo] [timestamp_hi]
-      [crc]
-
-    Se o formato real for diferente, o modo --raw ajuda a descobrir.
-    """
-
     def __init__(self):
         self.buffer = bytearray()
-        self.scan_data = {}  # angulo -> distancia
         self.current_scan = []
         self.scan_count = 0
         self.point_count = 0
@@ -179,12 +106,10 @@ class CoinD6Parser:
         self.raw_packets = 0
 
     def feed(self, data):
-        """Alimenta bytes e retorna scans completos."""
         self.buffer.extend(data)
         scans = []
 
         while len(self.buffer) >= 4:
-            # Procurar header AA 55
             idx = self.buffer.find(HEADER)
             if idx < 0:
                 self.buffer.clear()
@@ -192,47 +117,35 @@ class CoinD6Parser:
             if idx > 0:
                 self.buffer = self.buffer[idx:]
 
-            # Precisamos de pelo menos o header + type + count
             if len(self.buffer) < 4:
                 break
 
             packet_type = self.buffer[2]
             sample_count = self.buffer[3]
 
-            # Validar sample_count razoavel (1-40 pontos por pacote)
             if sample_count == 0 or sample_count > 50:
-                # Nao eh um pacote valido, pular esse header
                 self.buffer = self.buffer[2:]
                 self.parse_errors += 1
                 continue
 
-            # Tamanho esperado: header(2) + type(1) + count(1) +
-            # start_angle(2) + [distance(2) + intensity(1)] * count +
-            # end_angle(2) + timestamp(2) + crc(1)
             expected_len = 2 + 1 + 1 + 2 + (sample_count * 3) + 2 + 2 + 1
 
             if len(self.buffer) < expected_len:
-                break  # Esperar mais dados
+                break
 
-            # Extrair pacote
             packet = self.buffer[:expected_len]
             self.buffer = self.buffer[expected_len:]
             self.raw_packets += 1
 
-            # Parse
             try:
                 start_angle = struct.unpack_from('<H', packet, 4)[0] * 0.01
                 end_angle_offset = 4 + 2 + sample_count * 3
                 end_angle = struct.unpack_from('<H', packet, end_angle_offset)[0] * 0.01
 
-                # Calcular step angular
                 angle_diff = end_angle - start_angle
                 if angle_diff < 0:
                     angle_diff += 360.0
-                if sample_count > 1:
-                    angle_step = angle_diff / (sample_count - 1)
-                else:
-                    angle_step = 0
+                angle_step = angle_diff / (sample_count - 1) if sample_count > 1 else 0
 
                 for i in range(sample_count):
                     offset = 6 + i * 3
@@ -241,12 +154,9 @@ class CoinD6Parser:
                     distance_mm = struct.unpack_from('<H', packet, offset)[0]
                     intensity = packet[offset + 2]
                     distance_m = distance_mm / 1000.0
+                    angle = (start_angle + i * angle_step) % 360.0
 
-                    angle = start_angle + i * angle_step
-                    if angle >= 360:
-                        angle -= 360
-
-                    if 0 < distance_mm < 12000:  # Filtrar dados invalidos
+                    if 0 < distance_mm < 12000:
                         self.current_scan.append({
                             'angle': angle,
                             'distance': distance_m,
@@ -254,7 +164,6 @@ class CoinD6Parser:
                         })
                         self.point_count += 1
 
-                # Detectar scan completo (volta completa ~ 400 pontos)
                 if len(self.current_scan) >= 350:
                     scans.append(self.current_scan)
                     self.current_scan = []
@@ -266,300 +175,398 @@ class CoinD6Parser:
         return scans
 
 
-def angle_to_grid(angle, distance, grid_size=40, max_range=6.0):
-    """Converte coordenada polar para posicao no grid ASCII."""
-    if distance > max_range or distance <= 0:
-        return None, None
-    rad = math.radians(angle)
-    x = distance * math.cos(rad)
-    y = distance * math.sin(rad)
-    gx = int((x / max_range) * (grid_size // 2) + grid_size // 2)
-    gy = int((-y / max_range) * (grid_size // 2) + grid_size // 2)
-    if 0 <= gx < grid_size and 0 <= gy < grid_size:
-        return gx, gy
-    return None, None
+# ============================================================
+# Conexao serial
+# ============================================================
+def find_serial_port():
+    for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*']:
+        ports = glob.glob(pattern)
+        if ports:
+            return sorted(ports)[0]
+    return None
 
 
-def render_ascii_scan(scan_points, grid_size=41, max_range=6.0):
-    """Renderiza um scan como mapa ASCII no terminal."""
-    grid = [[' ' for _ in range(grid_size)] for _ in range(grid_size)]
-    center = grid_size // 2
+def connect_lidar(port):
+    ser = serial.Serial(
+        port=port, baudrate=BAUD_RATE,
+        bytesize=serial.EIGHTBITS, parity=serial.PARITY_NONE,
+        stopbits=serial.STOPBITS_ONE, timeout=0.01,  # non-blocking
+    )
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+    time.sleep(0.1)
+    ser.write(CMD_START)
+    time.sleep(0.3)
+    return ser
 
-    # Marcar centro (posicao do LiDAR)
-    grid[center][center] = '◉'
 
-    # Plotar pontos
-    for pt in scan_points:
-        gx, gy = angle_to_grid(pt['angle'], pt['distance'], grid_size, max_range)
-        if gx is not None:
-            if pt['distance'] < 1.0:
-                grid[gy][gx] = '█'  # Muito perto
-            elif pt['distance'] < 3.0:
-                grid[gy][gx] = '▓'  # Perto
+# ============================================================
+# Visualizador Pygame
+# ============================================================
+class LidarVisualizer:
+    def __init__(self, width=900, height=700, max_range=6.0, fullscreen=False):
+        pygame.init()
+        pygame.display.set_caption("COIN-D6 LiDAR — TCC Veiculos Autonomos")
+
+        self.width = width
+        self.height = height
+        self.max_range = max_range
+
+        flags = 0
+        if fullscreen:
+            flags = pygame.FULLSCREEN
+            info = pygame.display.Info()
+            self.width = info.current_w
+            self.height = info.current_h
+
+        self.screen = pygame.display.set_mode((self.width, self.height), flags)
+        self.clock = pygame.time.Clock()
+
+        # Area do radar (quadrado, centralizado na metade esquerda)
+        self.radar_size = min(self.height - 80, self.width - 300) 
+        self.radar_cx = self.radar_size // 2 + 30
+        self.radar_cy = self.height // 2
+        self.radar_radius = self.radar_size // 2 - 20
+
+        # Painel lateral
+        self.panel_x = self.radar_size + 60
+
+        # Fontes
+        self.font_big = pygame.font.SysFont("monospace", 22, bold=True)
+        self.font_med = pygame.font.SysFont("monospace", 16)
+        self.font_sml = pygame.font.SysFont("monospace", 13)
+
+        # Dados
+        self.last_scan = []
+        self.sectors = [99.0] * 8
+        self.scan_count = 0
+        self.point_count = 0
+        self.fps = 0
+        self.scan_rate = 0
+        self.last_scan_time = time.monotonic()
+        self.parse_errors = 0
+
+        # Pre-render do fundo do radar (nao muda)
+        self.bg_surface = None
+        self._render_background()
+
+    def _render_background(self):
+        """Pre-renderiza o fundo estatico do radar."""
+        self.bg_surface = pygame.Surface((self.width, self.height))
+        self.bg_surface.fill(BLACK)
+
+        cx, cy, r = self.radar_cx, self.radar_cy, self.radar_radius
+
+        # Aneis de distancia
+        num_rings = 6
+        for i in range(1, num_rings + 1):
+            ring_r = int(r * i / num_rings)
+            pygame.draw.circle(self.bg_surface, RING_COLOR, (cx, cy), ring_r, 1)
+            # Label de distancia
+            dist_label = f"{self.max_range * i / num_rings:.0f}m"
+            txt = self.font_sml.render(dist_label, True, LIGHT_GRAY)
+            self.bg_surface.blit(txt, (cx + ring_r + 3, cy - 8))
+
+        # Linhas dos 8 setores (cada 45°)
+        for i in range(8):
+            angle = math.radians(i * 45)
+            x1 = cx + int(r * math.cos(angle))
+            y1 = cy - int(r * math.sin(angle))
+            pygame.draw.line(self.bg_surface, SECTOR_LINE, (cx, cy), (x1, y1), 1)
+
+        # Cruz central
+        pygame.draw.line(self.bg_surface, MID_GRAY, (cx - r, cy), (cx + r, cy), 1)
+        pygame.draw.line(self.bg_surface, MID_GRAY, (cx, cy - r), (cx, cy + r), 1)
+
+        # Labels de direcao
+        dirs = [("0°", cx + r + 5, cy - 8),
+                ("90°", cx - 12, cy - r - 18),
+                ("180°", cx - r - 35, cy - 8),
+                ("270°", cx - 12, cy + r + 4)]
+        for label, x, y in dirs:
+            txt = self.font_sml.render(label, True, LIGHT_GRAY)
+            self.bg_surface.blit(txt, (x, y))
+
+    def polar_to_screen(self, angle_deg, distance_m):
+        """Converte coordenada polar para pixel na tela."""
+        if distance_m > self.max_range:
+            return None, None
+        rad = math.radians(angle_deg)
+        scale = self.radar_radius / self.max_range
+        x = self.radar_cx + int(distance_m * math.cos(rad) * scale)
+        y = self.radar_cy - int(distance_m * math.sin(rad) * scale)
+        return x, y
+
+    def update(self, scan, parser):
+        """Atualiza com novos dados."""
+        if scan:
+            self.last_scan = scan
+            self.scan_count = parser.scan_count
+            self.point_count = parser.point_count
+            self.parse_errors = parser.parse_errors
+
+            now = time.monotonic()
+            dt = now - self.last_scan_time
+            if dt > 0:
+                self.scan_rate = 1.0 / dt
+            self.last_scan_time = now
+
+            # Calcular setores (8 x 45°)
+            self.sectors = [99.0] * 8
+            for pt in scan:
+                idx = int(pt['angle'] / 45.0) % 8
+                self.sectors[idx] = min(self.sectors[idx], pt['distance'])
+
+    def draw(self):
+        """Desenha tudo."""
+        # Fundo pre-renderizado
+        self.screen.blit(self.bg_surface, (0, 0))
+
+        cx, cy, r = self.radar_cx, self.radar_cy, self.radar_radius
+
+        # ── Pontos do scan ──
+        for pt in self.last_scan:
+            x, y = self.polar_to_screen(pt['angle'], pt['distance'])
+            if x is not None:
+                color = dist_to_color(pt['distance'])
+                # Ponto com tamanho variavel (mais perto = maior)
+                size = max(1, 4 - int(pt['distance'] / self.max_range * 3))
+                if size <= 1:
+                    self.screen.set_at((x, y), color)
+                else:
+                    pygame.draw.circle(self.screen, color, (x, y), size)
+
+        # ── Centro (posicao do LiDAR) ──
+        pygame.draw.circle(self.screen, WHITE, (cx, cy), 5, 0)
+        pygame.draw.circle(self.screen, CYAN, (cx, cy), 5, 1)
+
+        # ── Zona de safety net (3m) ──
+        safety_r = int(3.0 / self.max_range * r)
+        pygame.draw.circle(self.screen, (60, 20, 20), (cx, cy), safety_r, 1)
+
+        # ══════════════════════════════
+        # Painel lateral
+        # ══════════════════════════════
+        px = self.panel_x
+        py = 20
+
+        # Titulo
+        title = self.font_big.render("COIN-D6 LiDAR", True, CYAN)
+        self.screen.blit(title, (px, py))
+        py += 28
+
+        subtitle = self.font_sml.render("TCC — Veiculos Autonomos", True, LIGHT_GRAY)
+        self.screen.blit(subtitle, (px, py))
+        py += 30
+
+        # Separador
+        pygame.draw.line(self.screen, MID_GRAY, (px, py), (self.width - 20, py), 1)
+        py += 15
+
+        # Stats
+        stats = [
+            ("Scans",    f"{self.scan_count}"),
+            ("Pontos",   f"{len(self.last_scan)}"),
+            ("Scan Hz",  f"{self.scan_rate:.1f}"),
+            ("FPS",      f"{self.fps:.0f}"),
+            ("Range",    f"{self.max_range:.1f}m"),
+            ("Erros",    f"{self.parse_errors}"),
+        ]
+        for label, value in stats:
+            txt_l = self.font_sml.render(f"{label}:", True, LIGHT_GRAY)
+            txt_v = self.font_med.render(value, True, WHITE)
+            self.screen.blit(txt_l, (px, py))
+            self.screen.blit(txt_v, (px + 80, py - 1))
+            py += 22
+
+        py += 10
+        pygame.draw.line(self.screen, MID_GRAY, (px, py), (self.width - 20, py), 1)
+        py += 15
+
+        # ── Distancias por setor ──
+        header = self.font_med.render("Dist. por Setor", True, YELLOW)
+        self.screen.blit(header, (px, py))
+        py += 25
+
+        sector_labels = [
+            "0°   Frente ",
+            "45°  Fr-Dir ",
+            "90°  Direita",
+            "135° Tr-Dir ",
+            "180° Tras   ",
+            "225° Tr-Esq ",
+            "270° Esquer.",
+            "315° Fr-Esq ",
+        ]
+
+        bar_max_w = self.width - px - 100
+
+        for i, label in enumerate(sector_labels):
+            dist = self.sectors[i]
+            dist_str = f"{dist:.1f}m" if dist < 50 else " --"
+
+            # Cor baseada na distancia
+            if dist < 1.0:
+                color = RED
+            elif dist < 3.0:
+                color = ORANGE
+            elif dist < 5.0:
+                color = YELLOW
             else:
-                grid[gy][gx] = '░'  # Longe
+                color = GREEN
 
-    lines = []
-    for row in grid:
-        lines.append('  ' + ''.join(row))
-    return '\n'.join(lines)
+            # Label
+            txt = self.font_sml.render(label, True, LIGHT_GRAY)
+            self.screen.blit(txt, (px, py))
 
+            # Valor
+            txt_v = self.font_sml.render(dist_str, True, color)
+            self.screen.blit(txt_v, (px + 110, py))
 
-def clear_screen():
-    sys.stdout.write("\033[2J\033[H")
-    sys.stdout.flush()
+            # Barra
+            if dist < 50:
+                bar_w = max(1, int((dist / self.max_range) * bar_max_w))
+                bar_w = min(bar_w, bar_max_w)
+                bar_rect = pygame.Rect(px + 160, py + 2, bar_w, 12)
+                pygame.draw.rect(self.screen, color, bar_rect)
+                pygame.draw.rect(self.screen, DARK_GRAY, bar_rect, 1)
 
+            py += 20
 
-def run_scan_display(ser, max_range=6.0):
-    """Modo principal: mostra scan em tempo real."""
-    parser = CoinD6Parser()
-    last_scan = None
-    start_time = time.monotonic()
+        py += 15
+        pygame.draw.line(self.screen, MID_GRAY, (px, py), (self.width - 20, py), 1)
+        py += 15
 
-    print("\n  Recebendo dados do COIN-D6...")
-    print("  Aguardando primeiro scan completo...\n")
+        # ── Safety net status ──
+        min_dist = min(self.sectors)
+        if min_dist < 3.0:
+            safety_txt = self.font_med.render("! SAFETY NET ATIVO !", True, RED)
+            safety_detail = self.font_sml.render(
+                f"Obstaculo a {min_dist:.2f}m — freio!", True, ORANGE)
+            self.screen.blit(safety_txt, (px, py))
+            self.screen.blit(safety_detail, (px, py + 22))
+        else:
+            safety_txt = self.font_med.render("Safety net: OK", True, GREEN)
+            self.screen.blit(safety_txt, (px, py))
+        py += 45
 
-    try:
-        while True:
-            data = ser.read(512)
-            if not data:
-                continue
+        # ── Legenda de cores ──
+        legend = self.font_sml.render("Legenda:", True, LIGHT_GRAY)
+        self.screen.blit(legend, (px, py))
+        py += 18
 
-            scans = parser.feed(data)
+        legend_items = [
+            (RED,    "< 1m"),
+            (ORANGE, "1-2m"),
+            (YELLOW, "2-3m"),
+            (GREEN,  "3-5m"),
+            (CYAN,   "5-8m"),
+            (BLUE,   "8-12m"),
+        ]
 
-            if scans:
-                last_scan = scans[-1]
+        for color, label in legend_items:
+            pygame.draw.rect(self.screen, color, (px, py + 2, 12, 12))
+            txt = self.font_sml.render(label, True, LIGHT_GRAY)
+            self.screen.blit(txt, (px + 18, py))
+            py += 17
 
-            # Atualizar display a cada ~200ms
-            elapsed = time.monotonic() - start_time
-            if last_scan and elapsed > 0.5:
-                clear_screen()
-                print("=" * 60)
-                print("  COIN-D6 LiDAR — Scan em Tempo Real")
-                print("  TCC: Digital Twins para Veiculos Autonomos")
-                print("=" * 60)
-                print()
+        py += 10
 
-                # Estatisticas
-                print(f"  Scans completos: {parser.scan_count}")
-                print(f"  Pontos totais:   {parser.point_count}")
-                print(f"  Pacotes raw:     {parser.raw_packets}")
-                print(f"  Erros de parse:  {parser.parse_errors}")
-                print(f"  Pontos no scan:  {len(last_scan)}")
-                print()
+        # ── Controles ──
+        controls = [
+            "[+/-]  Zoom in/out",
+            "[R]    Reset range",
+            "[S]    Screenshot",
+            "[ESC]  Sair",
+        ]
+        for ctrl in controls:
+            txt = self.font_sml.render(ctrl, True, MID_GRAY)
+            self.screen.blit(txt, (px, py))
+            py += 16
 
-                # Distancias por regiao (util pro projeto)
-                sectors = [999.0] * 8
-                for pt in last_scan:
-                    a = pt['angle']
-                    d = pt['distance']
-                    # Mapear 0-360 para 8 setores
-                    sector_idx = int(a / 45.0) % 8
-                    sectors[sector_idx] = min(sectors[sector_idx], d)
+        # Circulo vermelho de safety net (legenda)
+        safety_label = self.font_sml.render("Circulo vermelho = 3m (safety net)", True, (60, 20, 20))
+        self.screen.blit(safety_label, (30, self.height - 20))
 
-                labels = ["Frente", "Fr-Dir", "Direita", "Tr-Dir",
-                          "Tras  ", "Tr-Esq", "Esquerda", "Fr-Esq"]
-                print("  Distancia minima por setor:")
-                for i, (label, dist) in enumerate(zip(labels, sectors)):
-                    bar_len = min(int(dist * 3), 30)
-                    bar = '█' * bar_len
-                    dist_str = f"{dist:.2f}m" if dist < 100 else " ---"
-                    print(f"    {label}: {dist_str:>7s}  {bar}")
-                print()
+        pygame.display.flip()
+        self.fps = self.clock.get_fps()
+        self.clock.tick(30)
 
-                # Mapa ASCII
-                print(f"  Mapa (range {max_range}m, ◉ = LiDAR):")
-                print(render_ascii_scan(last_scan, 41, max_range))
-                print()
-                print(f"  [Ctrl+C para sair]  [Range: {max_range}m]")
-
-                last_scan = None
-                start_time = time.monotonic()
-
-    except KeyboardInterrupt:
-        print("\n\n  Parando...")
-
-
-# ============================================================
-# Modo 3: Gravar CSV
-# ============================================================
-def run_csv_logger(ser, duration=30):
-    """Grava dados do LiDAR em CSV."""
-    import csv
-
-    parser = CoinD6Parser()
-    filename = f"lidar_scan_{int(time.time())}.csv"
-
-    print(f"\n  Gravando {duration}s de scans em {filename}...")
-    print(f"  Ctrl+C para parar antes.\n")
-
-    start = time.monotonic()
-    all_points = []
-
-    try:
-        while (time.monotonic() - start) < duration:
-            data = ser.read(512)
-            if data:
-                scans = parser.feed(data)
-                for scan in scans:
-                    for pt in scan:
-                        pt['scan_id'] = parser.scan_count
-                        pt['timestamp'] = time.monotonic() - start
-                        all_points.append(pt)
-
-            elapsed = time.monotonic() - start
-            pct = elapsed / duration * 100
-            sys.stdout.write(f"\r  [{int(pct):3d}%] Scans: {parser.scan_count}, Pontos: {len(all_points)}")
-            sys.stdout.flush()
-
-    except KeyboardInterrupt:
-        print("\n  Gravacao interrompida.")
-
-    # Salvar
-    with open(filename, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['scan_id', 'timestamp_s', 'angle_deg', 'distance_m', 'intensity'])
-        for pt in all_points:
-            writer.writerow([
-                pt['scan_id'],
-                f"{pt['timestamp']:.4f}",
-                f"{pt['angle']:.2f}",
-                f"{pt['distance']:.4f}",
-                pt['intensity'],
-            ])
-
-    print(f"\n\n  Salvo: {filename}")
-    print(f"  {len(all_points)} pontos em {parser.scan_count} scans")
-    print(f"  Abra no Excel ou plote com matplotlib para visualizar.")
-
-
-# ============================================================
-# Modo 4: Teste rapido de conectividade
-# ============================================================
-def run_quick_test(ser):
-    """Teste rapido: mostra os primeiros pacotes recebidos."""
-    print("\n  === TESTE RAPIDO DE CONECTIVIDADE ===\n")
-
-    parser = CoinD6Parser()
-    start = time.monotonic()
-    test_duration = 5  # 5 segundos
-
-    while (time.monotonic() - start) < test_duration:
-        data = ser.read(256)
-        if data:
-            parser.feed(data)
-
-        elapsed = time.monotonic() - start
-        sys.stdout.write(
-            f"\r  [{elapsed:.1f}s] Pacotes: {parser.raw_packets} | "
-            f"Pontos: {parser.point_count} | "
-            f"Scans: {parser.scan_count} | "
-            f"Erros: {parser.parse_errors}"
-        )
-        sys.stdout.flush()
-
-    print("\n")
-
-    if parser.raw_packets > 0 and parser.parse_errors < parser.raw_packets * 0.5:
-        print("  ✅ LIDAR FUNCIONANDO!")
-        print(f"     {parser.raw_packets} pacotes recebidos e parseados.")
-        print(f"     {parser.scan_count} scans completos (360°).")
-        print(f"     {parser.point_count} pontos de distancia validos.")
-        print(f"\n     Pronto para usar no carro autonomo!")
+    def handle_events(self):
+        """Retorna False se deve sair."""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE or event.key == pygame.K_q:
+                    return False
+                elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
+                    self.max_range = max(1.0, self.max_range - 1.0)
+                    self._render_background()
+                elif event.key == pygame.K_MINUS:
+                    self.max_range = min(12.0, self.max_range + 1.0)
+                    self._render_background()
+                elif event.key == pygame.K_r:
+                    self.max_range = 6.0
+                    self._render_background()
+                elif event.key == pygame.K_s:
+                    fname = f"lidar_screenshot_{int(time.time())}.png"
+                    pygame.image.save(self.screen, fname)
+                    print(f"  Screenshot salvo: {fname}")
         return True
-    elif parser.raw_packets > 0:
-        print("  ⚠  LIDAR RESPONDENDO mas com muitos erros de parse.")
-        print(f"     {parser.raw_packets} pacotes, {parser.parse_errors} erros.")
-        print(f"     O formato do pacote pode ser diferente do esperado.")
-        print(f"     Rode com --raw para ver os bytes e ajustar o parser.")
-        return True
-    else:
-        print("  ❌ SEM DADOS DO LIDAR")
-        print("     Verifique:")
-        print("     1. O adaptador CH340 USB esta conectado ao Jetson?")
-        print("     2. O LiDAR esta girando? (ele precisa de 5V pelo USB)")
-        print("     3. Os fios estao corretos?")
-        print("        Amarelo=5V, Branco=GND, Vermelho=TXD, Preto=RXD")
-        print("     4. A porta serial esta correta? Tente: ls /dev/ttyUSB*")
-        return False
 
 
 # ============================================================
-# Main
+# Main loop
 # ============================================================
 def main():
-    parser = argparse.ArgumentParser(
-        description="Teste do LiDAR COIN-D6 no Jetson Nano",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Exemplos:
-  python3 coin_d6_test.py                     # Teste rapido + scan visual
-  python3 coin_d6_test.py --raw               # Hex dump para debug
-  python3 coin_d6_test.py --csv 60            # Gravar 60s em CSV
-  python3 coin_d6_test.py --port /dev/ttyUSB1 # Porta especifica
-  python3 coin_d6_test.py --range 3.0         # Mapa com range de 3m
-        """
-    )
-    parser.add_argument("--port", type=str, default=None,
-                        help="Porta serial (default: auto-detecta)")
-    parser.add_argument("--raw", action="store_true",
-                        help="Modo hex dump (debug)")
-    parser.add_argument("--csv", type=int, default=None,
-                        help="Gravar N segundos de dados em CSV")
-    parser.add_argument("--range", type=float, default=6.0,
-                        help="Range maximo do mapa em metros (default: 6)")
-    parser.add_argument("--test", action="store_true",
-                        help="Apenas teste rapido de conectividade (5s)")
+    argp = argparse.ArgumentParser(description="Visualizador COIN-D6 LiDAR")
+    argp.add_argument("--port", type=str, default=None)
+    argp.add_argument("--range", type=float, default=6.0,
+                      help="Range maximo em metros (default: 6)")
+    argp.add_argument("--fullscreen", action="store_true")
+    args = argp.parse_args()
 
-    args = parser.parse_args()
-
-    # Encontrar porta
-    port = args.port
-    if port is None:
-        port = find_serial_port()
-        if port is None:
-            print("\n  [ERRO] Nenhuma porta serial encontrada!")
-            print("  Verifique se o adaptador CH340 USB esta conectado.")
-            print("  Dica: rode 'ls /dev/ttyUSB*' para verificar.")
-            print("  Se nao aparecer, pode precisar instalar o driver:")
-            print("    sudo apt-get install linux-modules-extra-$(uname -r)")
-            sys.exit(1)
-        print(f"  Auto-detectada porta: {port}")
-
-    # Verificar permissoes
-    if os.path.exists(port) and not os.access(port, os.R_OK | os.W_OK):
-        print(f"\n  [ERRO] Sem permissao para acessar {port}")
-        print(f"  Rode com sudo: sudo python3 {sys.argv[0]}")
-        print(f"  Ou adicione seu usuario ao grupo dialout:")
-        print(f"    sudo usermod -aG dialout $USER")
-        print(f"    (precisa relogar depois)")
+    # Porta serial
+    port = args.port or find_serial_port()
+    if not port:
+        print("[ERRO] Porta serial nao encontrada. Use --port /dev/ttyUSB0")
         sys.exit(1)
 
-    # Conectar
-    try:
-        ser = connect_lidar(port)
-    except serial.SerialException as e:
-        print(f"\n  [ERRO] Nao conseguiu abrir {port}: {e}")
-        sys.exit(1)
+    print(f"  Porta: {port}")
+    print(f"  Range: {args.range}m")
+    print(f"  Conectando ao COIN-D6...")
 
+    ser = connect_lidar(port)
+    parser = CoinD6Parser()
+    viz = LidarVisualizer(max_range=args.range, fullscreen=args.fullscreen)
+
+    print(f"  Visualizador iniciado! Janela aberta.")
+    print(f"  [ESC] para sair | [+/-] zoom | [S] screenshot\n")
+
+    running = True
     try:
-        if args.test:
-            run_quick_test(ser)
-        elif args.raw:
-            run_hex_dump(ser, duration=10)
-        elif args.csv:
-            run_csv_logger(ser, duration=args.csv)
-        else:
-            # Primeiro faz um teste rapido
-            print()
-            ok = run_quick_test(ser)
-            if ok:
-                print("\n  Iniciando scan visual em 2s...")
-                print("  (Ctrl+C para sair a qualquer momento)\n")
-                time.sleep(2)
-                run_scan_display(ser, max_range=args.range)
+        while running:
+            # Ler dados seriais
+            data = ser.read(1024)
+            if data:
+                scans = parser.feed(data)
+                if scans:
+                    viz.update(scans[-1], parser)
+
+            # Eventos e desenho
+            running = viz.handle_events()
+            viz.draw()
+
+    except KeyboardInterrupt:
+        pass
     finally:
-        stop_lidar(ser)
+        print("\n  Encerrando...")
+        ser.write(CMD_STOP)
+        time.sleep(0.1)
+        ser.close()
+        pygame.quit()
+        print("  Pronto!")
 
 
 if __name__ == "__main__":
