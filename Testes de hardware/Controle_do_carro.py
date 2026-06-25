@@ -2,7 +2,7 @@
 import Jetson.GPIO as GPIO
 import time
 
-SERVO_PIN = 33
+SERVO_PIN = 32
 GPIO.setmode(GPIO.BOARD)
 GPIO.setup(SERVO_PIN, GPIO.OUT)
 
