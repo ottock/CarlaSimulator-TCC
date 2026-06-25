@@ -1,15 +1,14 @@
-
 import Jetson.GPIO as GPIO
 import time
 
-SERVO_PIN = 32
-GPIO.setmode(GPIO.BOARD)
-GPIO.setup(SERVO_PIN, GPIO.OUT)
+# Tenta pelo nome do pino no chip em vez do board
+GPIO.setmode(GPIO.TEGRA_SOC)
+GPIO.setup("SPI1_MOSI", GPIO.OUT)  # equivale ao PWM0
 
-pwm = GPIO.PWM(SERVO_PIN, 50)  # 50Hz = padrao servo
-pwm.start(7.5)                  # neutro (reto)
+pwm = GPIO.PWM("SPI1_MOSI", 50)
+pwm.start(7.5)
 
-print("Neutro (reto)")
+print("Neutro")
 time.sleep(2)
 
 print("Esquerda")
@@ -20,14 +19,5 @@ print("Neutro")
 pwm.ChangeDutyCycle(7.5)
 time.sleep(1)
 
-print("Direita")
-pwm.ChangeDutyCycle(10.0)
-time.sleep(1)
-
-print("Neutro")
-pwm.ChangeDutyCycle(7.5)
-time.sleep(1)
-
 pwm.stop()
 GPIO.cleanup()
-print("Teste concluido!")
