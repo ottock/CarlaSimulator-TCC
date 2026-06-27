@@ -29,7 +29,7 @@ PWM_FREQ_HZ = 50       # padrao RC
 
 # Larguras de pulso em microssegundos.
 NEUTRAL_US  = 1500     # ESC parado / neutro
-ARM_HOLD_S  = 5.0      # tempo segurando neutro para o ESC armar
+ARM_HOLD_S  = 15.0      # tempo segurando neutro para o ESC armar
 
 # Faixa de teste PROPOSITALMENTE estreita. So pra confirmar que anda.
 # Depois de validado, abrir ate ~1900 conforme a calibracao (etapa 2.4).
