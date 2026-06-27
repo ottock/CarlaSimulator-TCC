@@ -32,11 +32,22 @@
 
 import sys
 import time
+import os
+
+# --- Workaround do pygame/SDL neste Jetson (JetPack 4.6.x, SDL 2.0.8) ---
+# Sem isto, o pygame aborta com "Aborted (core dumped)" ao abrir a janela:
+#   SDL_VIDEODRIVER=x11   -> forca o backend de video X11 (o que roda aqui)
+#   DBUS_FATAL_WARNINGS=0 -> impede que um aviso do D-Bus derrube o processo
+# Tem que vir ANTES de 'import pygame'. (Validado na bancada Jun 2026.)
+os.environ.setdefault("SDL_VIDEODRIVER", "x11")
+os.environ.setdefault("DBUS_FATAL_WARNINGS", "0")
 
 try:
     import pygame
 except ImportError:
-    print("ERRO: pygame nao instalado. Rode: sudo pip3 install pygame")
+    print("ERRO: pygame nao instalado.")
+    print("Instalado via: python3 -m pip install --user pygame==2.1.2")
+    print("(precisa de libsdl2-dev, libjpeg-dev etc. via apt antes de compilar)")
     sys.exit(1)
 
 try:
@@ -54,7 +65,7 @@ except ImportError:
 # --- Trava de seguranca do ESC ---
 # False  -> throttle NUNCA e enviado (so testa servo). Use assim primeiro.
 # True   -> habilita throttle. So com rodas no ar e kill switch na mao.
-ESC_ARMADO = False
+ESC_ARMADO = True
 
 # --- I2C / PCA9685 ---
 I2C_ADDRESS = 0x40
