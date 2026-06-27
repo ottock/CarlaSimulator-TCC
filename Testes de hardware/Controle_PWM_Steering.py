@@ -24,7 +24,7 @@ import Adafruit_PCA9685
 I2C_ADDRESS = 0x40       # endereco do PCA9685 (confirmado via i2cdetect)
 I2C_BUSNUM = 1           # barramento I2C do Jetson (i2cdetect -y -r 1)
 
-SERVO_CHANNEL = 1        # canal do servo (steering) no PCA9685
+SERVO_CHANNEL = 15        # canal do servo (steering) no PCA9685
 PWM_FREQ = 50            # Hz - padrao RC
 
 # Limites em microssegundos (largura de pulso).
