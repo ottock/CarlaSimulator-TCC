@@ -21,6 +21,9 @@ import Adafruit_PCA9685
 # CONFIGURACAO
 # ----------------------------------------------------------------------
 
+I2C_ADDRESS = 0x40       # endereco do PCA9685 (confirmado via i2cdetect)
+I2C_BUSNUM = 1           # barramento I2C do Jetson (i2cdetect -y -r 1)
+
 SERVO_CHANNEL = 1        # canal do servo (steering) no PCA9685
 PWM_FREQ = 50            # Hz - padrao RC
 
@@ -58,8 +61,10 @@ def us_to_steps(microseconds):
 # ----------------------------------------------------------------------
 # SETUP DO PCA9685
 # ----------------------------------------------------------------------
+# busnum=1 evita o autodetect que falha no Jetson
+# ("Could not determine default I2C bus for platform").
 
-pwm = Adafruit_PCA9685.PCA9685()     # endereco padrao 0x40, barramento 1
+pwm = Adafruit_PCA9685.PCA9685(address=I2C_ADDRESS, busnum=I2C_BUSNUM)
 pwm.set_pwm_freq(PWM_FREQ)
 
 
@@ -95,6 +100,8 @@ def sweep_once():
 
 def main():
     print("Teste de steering via PCA9685 (Adafruit_PCA9685 legacy)")
+    print("Endereco: 0x{:02X} | Barramento I2C: {}".format(
+        I2C_ADDRESS, I2C_BUSNUM))
     print("Freq: {} Hz | MIN: {}us | CENTRO: {}us | MAX: {}us".format(
         PWM_FREQ, US_MIN, US_CENTER, US_MAX))
     print("Centralizando servo...")
