@@ -22,7 +22,7 @@ import Adafruit_PCA9685
 # ---------------------------------------------------------------------------
 # Configuracao
 # ---------------------------------------------------------------------------
-ESC_CHANNEL = 14       # canal fisico onde o cabo do ESC esta plugado no PCA9685
+ESC_CHANNEL = 12       # canal fisico onde o cabo do ESC esta plugado no PCA9685
 I2C_ADDRESS = 0x40     # confirmado com: i2cdetect -y -r 1
 I2C_BUSNUM  = 1        # Jetson: precisa ser explicito
 PWM_FREQ_HZ = 50       # padrao RC
