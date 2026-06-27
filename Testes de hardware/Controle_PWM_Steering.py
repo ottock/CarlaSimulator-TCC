@@ -45,7 +45,7 @@ STEP_DELAY = 0.02        # segundos entre passos
 # fracao do periodo = largura_us / periodo_us
 # duty_16bit = fracao * 65535
 
-PERIOD_US = 1_000_000 / PWM_FREQ   # 20000 us em 50Hz
+PERIOD_US = 1000000 / PWM_FREQ   # 20000 us em 50Hz
 
 
 def us_to_duty(microseconds):
