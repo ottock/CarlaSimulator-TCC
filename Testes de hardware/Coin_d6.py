@@ -162,7 +162,7 @@ def color_for_dist(d):
 # Visualizador
 # ============================================================
 class Visualizer:
-    def __init__(self, w=900, h=680, max_range=6.0, fullscreen=False):
+    def __init__(self, w=900, h=680, max_range=12.0, fullscreen=False):
         pygame.init()
         pygame.display.set_caption("COIN-D6 LiDAR")
 
@@ -209,9 +209,7 @@ class Visualizer:
         for i in range(1, n_rings + 1):
             rr = int(r * i / n_rings)
             pygame.draw.circle(self.bg, RING, (cx, cy), rr, 1)
-            d = self.max_range * i / n_rings
-            t = self.f_sml.render(f"{d:.0f}m", True, TXT_DIM)
-            self.bg.blit(t, (cx + rr + 2, cy - 7))
+            # Rotulos numericos dos aneis removidos a pedido (visual mais limpo).
 
         # Cross
         pygame.draw.line(self.bg, CROSS, (cx - r, cy), (cx + r, cy), 1)
@@ -362,7 +360,7 @@ class Visualizer:
                     self.max_range = min(12.0, self.max_range + 1.0)
                     self._draw_bg()
                 if e.key == pygame.K_r:
-                    self.max_range = 6.0
+                    self.max_range = 12.0
                     self._draw_bg()
                 if e.key == pygame.K_s:
                     fn = f"lidar_{int(time.time())}.png"
@@ -377,7 +375,7 @@ class Visualizer:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", default=None)
-    ap.add_argument("--range", type=float, default=6.0)
+    ap.add_argument("--range", type=float, default=12.0)
     ap.add_argument("--fullscreen", action="store_true")
     args = ap.parse_args()
 
