@@ -75,7 +75,7 @@ except ImportError:
 # --- Trava de seguranca do ESC ---
 # False -> throttle NUNCA enviado. Valide a fluidez assim PRIMEIRO.
 # True  -> habilita throttle. So com rodas no ar e kill switch na mao.
-ESC_ARMADO = False
+ESC_ARMADO = True
 
 # --- I2C / PCA9685 ---
 I2C_ADDRESS = 0x40
