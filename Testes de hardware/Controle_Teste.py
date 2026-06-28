@@ -439,6 +439,10 @@ def main():
     t_frame_ant = time.monotonic()
     laco_fps = 0.0
 
+    # --- Diagnostico do LiDAR (1x por segundo) ---
+    diag_t = time.monotonic()
+    diag_bytes = 0
+
     try:
         while rodando:
             t0 = time.monotonic()
@@ -501,11 +505,21 @@ def main():
                     waiting = lidar.in_waiting
                     if waiting > 0:
                         data = lidar.read(min(waiting, 4096))
+                        diag_bytes += len(data)
                         scans = parser.feed(data)
                         if scans:
                             app.update_scan(scans[-1])
                 except Exception as e:
                     print("AVISO: erro lendo LiDAR: {0}".format(e))
+
+            # Diagnostico 1x/seg: bytes/s, erros, pontos no scan atual e fechados
+            if time.monotonic() - diag_t >= 1.0:
+                print("[LIDAR] bytes/s={0}  scans_fechados={1}  "
+                      "parse_errors={2}  scan_atual={3}  pts_exibidos={4}".format(
+                          diag_bytes, parser.scan_count, parser.parse_errors,
+                          len(parser.current_scan), len(app.scan)))
+                diag_bytes = 0
+                diag_t = time.monotonic()
 
             # ---- 5. Desenhar (parte pesada, por ultimo) ----
             app.draw(steer_us, throttle_us, ESC_ARMADO, laco_fps, watchdog_ativo)
