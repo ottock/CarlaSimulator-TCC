@@ -15,6 +15,7 @@
         "track": {
             "enabled": true,
             "preset": "oval",
+            "escala": "real",
             "flip_y": -1,
             "flip_yaw": -1,
             "z": 0.05,
