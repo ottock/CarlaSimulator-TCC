@@ -82,6 +82,18 @@ def main(settings_path: str) -> None:
         with simulation_context(client, world_config) as (world, actor_list):
             logger.info("Simulation started")
 
+            # --- Modo pista custom (opt-in via settings["world"]["track"]) ---
+            # Monta a pista com as pecas do TCC (props tcc_*) e apenas exibe.
+            # NAO altera o fluxo padrao: sem "track" habilitado, segue igual
+            # (Town01 + ego + trafego + visualizacao).
+            track_cfg = world_config.get("track", {})
+            if track_cfg.get("enabled"):
+                from core.carlaClient.track_builder import build_track
+                build_track(world, track_cfg, actor_list)
+                logger.info("Pista custom montada. Modo visualizacao (Ctrl+C para sair).")
+                run_simulation(world)
+                return
+
             actor_vehicle, sensors = setup_scenario(client, world, world_config, actor_list)
             if actor_vehicle and sensors:
                 logger.info("Starting LIDAR visualization window")
