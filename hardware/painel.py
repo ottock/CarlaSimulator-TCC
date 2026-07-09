@@ -31,8 +31,8 @@ import subprocess
 # que os dois scripts ("Testes de Hardware"), basta o nome do arquivo.
 # Se voce mover o launcher, troque por caminho absoluto.
 
-CAMERA_SCRIPT   = "Camera_Teste.py"
-CONTROLE_SCRIPT = "Controle_Teste.py"
+CAMERA_SCRIPT   = "camera_teste.py"
+CONTROLE_SCRIPT = "controle_teste.py"
 
 # Pequena espera entre lancar um e outro (deixa a camera inicializar a
 # pipeline GStreamer antes do controle subir). Ajustavel.
@@ -64,7 +64,7 @@ def encerrar(proc, nome):
     print("Encerrando {0}...".format(nome))
     try:
         # SIGINT imita Ctrl+C -> deixa o script rodar o finally dele
-        # (o Controle_Teste.py centraliza o servo e neutraliza o ESC ai).
+        # (o controle_teste.py centraliza o servo e neutraliza o ESC ai).
         proc.send_signal(signal.SIGINT)
         # Da um tempo pro encerramento limpo.
         for _ in range(30):           # ate ~3s

@@ -6,8 +6,8 @@
 # Projeto TCC Carro Autonomo RC - Instituto Maua.
 #
 # Junta dois programas ja validados:
-#   - Coin_d6.py        (visualizador do LiDAR COIN-D6)
-#   - Controle_Teste.py (controle manual por teclado via PCA9685)
+#   - coin_d6.py        (visualizador do LiDAR COIN-D6)
+#   - controle_teste.py (controle manual por teclado via PCA9685)
 # ...num laco UNICO, numa janela UNICA. A camera fica para uma proxima etapa.
 #
 # Ambiente: Jetson Nano (Yahboom) / JetPack 4.6.x / Ubuntu 18.04 / Python 3.6
@@ -44,7 +44,7 @@ import math
 import struct
 import glob
 
-# --- Workaround pygame/SDL neste Jetson (ver Controle_Teste.py) ---
+# --- Workaround pygame/SDL neste Jetson (ver controle_teste.py) ---
 os.environ.setdefault("SDL_VIDEODRIVER", "x11")
 os.environ.setdefault("DBUS_FATAL_WARNINGS", "0")
 
@@ -155,7 +155,7 @@ def armar_esc():
 
 
 # ======================================================================
-# PARSER DO COIN-D6 (identico ao Coin_d6.py validado)
+# PARSER DO COIN-D6 (identico ao coin_d6.py validado)
 # ======================================================================
 class CoinD6Parser:
     def __init__(self):
