@@ -1,6 +1,16 @@
 # imports
 import json
 
+
+# helpers
+class _Optional:
+    """Wrap a schema entry (a type, a tuple of types, or a nested dict) to mark it
+    optional: validated when the key is present, skipped when absent."""
+
+    def __init__(self, schema):
+        self.schema = schema
+
+
 # constants
 _SCHEMA = {
     "carla_client": {
@@ -27,6 +37,19 @@ _SCHEMA = {
                 "upper_fov":          (int, float),
                 "lower_fov":          (int, float),
             },
+            # Optional: RGB camera intrinsics + mounting pose. When absent, the
+            # camera manager falls back to its defaults.
+            "camera": _Optional({
+                "width":  _Optional(int),
+                "height": _Optional(int),
+                "fov":    _Optional((int, float)),
+                "x":      _Optional((int, float)),
+                "y":      _Optional((int, float)),
+                "z":      _Optional((int, float)),
+                "pitch":  _Optional((int, float)),
+                "yaw":    _Optional((int, float)),
+                "roll":   _Optional((int, float)),
+            }),
         },
         "settings": {
             "synchronous_mode":    bool,
@@ -76,7 +99,12 @@ def _validate(data: dict, schema: dict, path: str = "") -> None:
     """
     for key, expected in schema.items():
         current_path = f"{path}.{key}" if path else key
+        optional = isinstance(expected, _Optional)
+        if optional:
+            expected = expected.schema
         if key not in data:
+            if optional:
+                continue
             raise ValueError(f"Missing required key: '{current_path}'")
         value = data[key]
         if isinstance(expected, dict):

@@ -273,6 +273,7 @@ def spawn_actor_vehicle(
         use_lidar = actor_config.get("use_lidar", True)
         use_camera = actor_config.get("use_camera", True)
         lidar_config = actor_config.get("lidar", {})
+        camera_config = actor_config.get("camera", {})
 
         sensors = setup_sensors(
             vehicle,
@@ -281,6 +282,7 @@ def spawn_actor_vehicle(
             use_lidar=use_lidar,
             use_camera=use_camera,
             lidar_config=lidar_config,
+            camera_config=camera_config,
         )
 
         # Enable autopilot for actor vehicle (if traffic manager provided)
