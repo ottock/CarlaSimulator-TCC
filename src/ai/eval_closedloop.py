@@ -111,12 +111,19 @@ def read_observation(vehicle, sensors):
 
 
 def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
-                    realtime=False, follow=True, launch=True, quality="Low", seed=0):
-    """Drive the ego with the expert in closed loop and report per-route metrics."""
+                    realtime=False, follow=True, launch=True, quality="Low", seed=0,
+                    autopilot=False):
+    """Drive the ego in closed loop and report per-route metrics.
+
+    ``autopilot=True`` uses CARLA's Traffic Manager (the smooth reference driver);
+    otherwise the injectable ``ExpertPolicy`` drives (the slot the model plugs
+    into from Fase 2).
+    """
     settings = load_settings(settings_path)
     carla_config = settings.get("carla_client", {})
     world_config = settings.get("world", {})
     actor_cfg = world_config.get("actor_vehicle", {})
+    tm_port = world_config.get("traffic_manager", {}).get("port", 8000)
 
     server = None
     try:
@@ -131,15 +138,23 @@ def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
         with simulation_context(client, world_config) as (world, actor_list):
             fixed_delta = world.get_settings().fixed_delta_seconds or 0.05
 
-            # Spawn ego + sensors WITHOUT autopilot (traffic_manager=None) so the
-            # policy is the only thing driving.
-            vehicle, sensors = spawn_actor_vehicle(world, actor_list, actor_cfg, traffic_manager=None)
+            if autopilot:
+                # Reference driver: CARLA's Traffic Manager controls the ego.
+                traffic_manager = client.get_trafficmanager(tm_port)
+                traffic_manager.set_synchronous_mode(True)
+                vehicle, sensors = spawn_actor_vehicle(
+                    world, actor_list, actor_cfg, traffic_manager, ignore_traffic_lights=True)
+                policy = None
+            else:
+                # Injectable policy drives; ego spawned WITHOUT autopilot.
+                vehicle, sensors = spawn_actor_vehicle(world, actor_list, actor_cfg, traffic_manager=None)
 
             # Let the spawn settle and the first sensor frames arrive.
             for _ in range(10):
                 world.tick()
 
-            policy = ExpertPolicy(world, vehicle, target_speed_kmh=target_speed_kmh, seed=seed)
+            if not autopilot:
+                policy = ExpertPolicy(world, vehicle, target_speed_kmh=target_speed_kmh, seed=seed)
             spectator_state = (
                 setup_spectator_follow_vehicle(world, vehicle, mode="behind") if follow else {}
             )
@@ -152,18 +167,22 @@ def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
                 for _ in range(steps_per_route):
                     tick_start = time.perf_counter()
 
-                    obs = read_observation(vehicle, sensors)
-                    steer, throttle, brake = policy(obs)
-                    vehicle.apply_control(
-                        carla.VehicleControl(steer=steer, throttle=throttle, brake=brake)
-                    )
-                    world.tick()
+                    if autopilot:
+                        world.tick()
+                        steer = vehicle.get_control().steer
+                    else:
+                        obs = read_observation(vehicle, sensors)
+                        steer, throttle, brake = policy(obs)
+                        vehicle.apply_control(
+                            carla.VehicleControl(steer=steer, throttle=throttle, brake=brake)
+                        )
+                        world.tick()
                     if spectator_state:
                         update_spectator_position(world, spectator_state)
 
                     deviation, lane_width, is_junction = lane_reference(world.get_map(), vehicle)
                     departed = (not is_junction) and (deviation > lane_width / 2.0)
-                    metrics.add(deviation, _speed_ms(vehicle), departed)
+                    metrics.add(deviation, _speed_ms(vehicle), departed, steer=steer)
 
                     if realtime:
                         remaining = fixed_delta - (time.perf_counter() - tick_start)
@@ -173,9 +192,11 @@ def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
                 summary = metrics.summary()
                 all_summaries.append(summary)
                 logger.info(
-                    "Route %d done: mean_dev=%.2fm p95=%.2fm max=%.2fm offlane=%d mean_speed=%.1fm/s",
+                    "Route %d done: mean_dev=%.2fm p95=%.2fm max=%.2fm offlane=%d "
+                    "mean_speed=%.1fm/s steer_jerk=%.4f steer_std=%.3f",
                     route, summary["mean_dev"], summary["p95_dev"], summary["max_dev"],
                     summary["offlane"], summary["mean_speed"],
+                    summary["mean_steer_jerk"], summary["steer_std"],
                 )
 
             _print_verdict(all_summaries)
@@ -208,6 +229,8 @@ def main():
     parser.add_argument("--no-launch", action="store_true", help="Attach to an already-running server")
     parser.add_argument("--quality", default="Low", help="CARLA quality level when launching")
     parser.add_argument("--seed", type=int, default=0, help="RNG seed for destinations")
+    parser.add_argument("--autopilot", action="store_true",
+                        help="Use CARLA's Traffic Manager (smooth reference driver) instead of the policy")
     args = parser.parse_args()
 
     run_closed_loop(
@@ -220,6 +243,7 @@ def main():
         launch=not args.no_launch,
         quality=args.quality,
         seed=args.seed,
+        autopilot=args.autopilot,
     )
 
 

@@ -17,18 +17,22 @@ N_SECTORS = 72
 MAX_RANGE_M = 12.0
 
 
-def scan_to_sectors(angles_deg, dist_m, n_sectors=N_SECTORS, max_range=MAX_RANGE_M):
-    """Reduce a polar scan to per-sector minimum distances, normalized to [0, 1].
+def scan_to_sectors_m(angles_deg, dist_m, n_sectors=N_SECTORS, max_range=MAX_RANGE_M):
+    """Reduce a polar scan to per-sector minimum distances, in METRES.
+
+    Free sectors (no return within range) hold ``max_range``. This is the form
+    stored in the dataset (``lidar.npy``) so training can re-normalize with any
+    ``max_range`` later.
 
     Args:
         angles_deg: iterable of ray angles in degrees (0 = front).
         dist_m: iterable of ray distances in metres, aligned with ``angles_deg``.
             Values <= 0 or > ``max_range`` are treated as "no return".
         n_sectors: number of angular sectors covering the full 360 deg.
-        max_range: distances at/after this are considered free; used to normalize.
+        max_range: cap; distances at/after this count as free.
 
     Returns:
-        ``np.ndarray`` of shape ``(n_sectors,)``, dtype float32, in [0, 1].
+        ``np.ndarray`` of shape ``(n_sectors,)``, dtype float32, in [0, max_range].
     """
     sectors = np.full(n_sectors, max_range, dtype=np.float32)
 
@@ -43,4 +47,13 @@ def scan_to_sectors(angles_deg, dist_m, n_sectors=N_SECTORS, max_range=MAX_RANGE
             idx = (a[valid] / sector_width).astype(np.int64) % n_sectors
             np.minimum.at(sectors, idx, d[valid].astype(np.float32))
 
-    return (sectors / max_range).astype(np.float32)
+    return sectors
+
+
+def scan_to_sectors(angles_deg, dist_m, n_sectors=N_SECTORS, max_range=MAX_RANGE_M):
+    """Same as :func:`scan_to_sectors_m` but normalized to [0, 1] (1.0 = free).
+
+    This is the model-input form.
+    """
+    meters = scan_to_sectors_m(angles_deg, dist_m, n_sectors=n_sectors, max_range=max_range)
+    return (meters / max_range).astype(np.float32)

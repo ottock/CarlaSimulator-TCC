@@ -8,7 +8,7 @@ fixed-length vector of per-sector minimum distances, normalized to [0, 1] where
 import numpy as np
 import pytest
 
-from ai.shared.lidar_pipeline import scan_to_sectors
+from ai.shared.lidar_pipeline import scan_to_sectors, scan_to_sectors_m
 
 
 def test_empty_scan_is_all_free():
@@ -71,3 +71,18 @@ def test_values_within_unit_interval():
     assert sectors.shape == (72,)
     assert sectors.min() >= 0.0
     assert sectors.max() <= 1.0
+
+
+def test_sectors_in_meters_keeps_distance():
+    # meters variant stores the raw minimum distance, free sectors = max_range
+    sectors = scan_to_sectors_m([0.0], [6.0], n_sectors=72, max_range=12.0)
+    assert sectors[0] == pytest.approx(6.0)
+    assert np.allclose(np.delete(sectors, 0), 12.0)
+
+
+def test_normalized_is_meters_over_max_range():
+    angles = [0.0, 30.0, 200.0]
+    dists = [3.0, 9.0, 1.5]
+    meters = scan_to_sectors_m(angles, dists, n_sectors=72, max_range=12.0)
+    norm = scan_to_sectors(angles, dists, n_sectors=72, max_range=12.0)
+    assert np.allclose(norm, meters / 12.0)

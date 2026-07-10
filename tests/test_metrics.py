@@ -42,3 +42,22 @@ def test_p95_is_high_percentile():
     for d in range(101):  # 0..100
         m.add(float(d), 1.0)
     assert m.summary()["p95_dev"] == pytest.approx(95.0, abs=1.0)
+
+
+def test_steer_smoothness_zero_for_constant_steering():
+    m = RouteMetrics()
+    for _ in range(5):
+        m.add(0.0, 1.0, steer=0.2)
+    s = m.summary()
+    assert s["mean_steer_jerk"] == pytest.approx(0.0)
+    assert s["steer_std"] == pytest.approx(0.0)
+
+
+def test_steer_jerk_measures_left_right_oscillation():
+    m = RouteMetrics()
+    for i in range(6):
+        m.add(0.0, 1.0, steer=(0.5 if i % 2 == 0 else -0.5))
+    s = m.summary()
+    # every consecutive step flips by 1.0 -> mean jerk 1.0; std of +/-0.5 is 0.5
+    assert s["mean_steer_jerk"] == pytest.approx(1.0)
+    assert s["steer_std"] == pytest.approx(0.5)
