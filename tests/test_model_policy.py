@@ -32,3 +32,41 @@ def test_policy_handles_missing_image(tmp_path):
     _save_ckpt(ckpt)
     policy = ModelSteeringPolicy(str(ckpt), device="cpu")
     assert policy({"image": None}) == (0.0, 0.0, 0.0)
+
+
+from ai.model import DrivingNet
+from ai.model_policy import DrivingPolicy
+
+
+def _save_driving_ckpt(path):
+    import torch
+    net = DrivingNet(); net(torch.zeros(1, 3, 66, 200), torch.zeros(1, 72))
+    torch.save({"model_state_dict": net.state_dict(), "arch": "DrivingNet"}, path)
+
+
+def _fake_obs():
+    return {"image": np.zeros((360, 640, 3), dtype=np.uint8),
+            "lidar": {"points": np.array([[5.0, 0.0, 0.0], [3.0, 1.0, 0.0]], dtype=np.float32)}}
+
+
+def test_driving_policy_returns_three_controls_in_range(tmp_path):
+    ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
+    pol = DrivingPolicy(str(ckpt), device="cpu")
+    steer, throttle, brake = pol(_fake_obs())
+    assert -1.0 <= steer <= 1.0
+    assert 0.0 <= throttle <= 1.0
+    assert 0.0 <= brake <= 1.0
+
+
+def test_driving_policy_no_image_is_safe(tmp_path):
+    ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
+    pol = DrivingPolicy(str(ckpt), device="cpu")
+    assert pol({"image": None, "lidar": None}) == (0.0, 0.0, 0.0)
+
+
+def test_driving_policy_throttle_floor(tmp_path):
+    ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
+    pol = DrivingPolicy(str(ckpt), device="cpu", throttle_floor=0.4)
+    steer, throttle, brake = pol(_fake_obs())
+    if brake < 0.05:
+        assert throttle >= 0.4  # piso aplicado quando não está freando

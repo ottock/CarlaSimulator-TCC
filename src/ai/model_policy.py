@@ -8,8 +8,10 @@ the SAME shared pipeline used in training (and later on the car).
 import numpy as np
 import torch
 
-from ai.model import CameraSteeringNet
+from ai.model import CameraSteeringNet, DrivingNet
 from ai.shared.image_pipeline import preprocess
+from ai.sim_lidar import points_to_sectors_m
+from ai.shared.lidar_pipeline import normalize_sectors_m
 
 
 class ModelSteeringPolicy:
@@ -31,3 +33,50 @@ class ModelSteeringPolicy:
             tensor = torch.from_numpy(x).unsqueeze(0).to(self.device)
             steer = float(self.model(tensor).item())
         return steer, self.throttle, 0.0
+
+
+class DrivingPolicy:
+    """Dual-input trained model as a closed-loop policy (Fase 3).
+
+    Consumes camera + LiDAR from ``obs`` and outputs (steer, throttle, brake).
+    LiDAR points are converted with the SAME sim adapter used at collection time,
+    then normalized with the SAME function used in training.
+    """
+
+    def __init__(self, ckpt_path, device=None, throttle_floor=0.0, brake_eps=0.05,
+                 n_sectors=72, max_range=12.0, ablate_lidar=False):
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.throttle_floor = throttle_floor
+        self.brake_eps = brake_eps
+        self.n_sectors = n_sectors
+        self.max_range = max_range
+        self.ablate_lidar = ablate_lidar
+        self.model = DrivingNet().to(self.device)
+        self.model(torch.zeros(1, 3, 66, 200, device=self.device),
+                   torch.zeros(1, n_sectors, device=self.device))  # init lazy
+        state = torch.load(ckpt_path, map_location=self.device, weights_only=False)
+        self.model.load_state_dict(state["model_state_dict"])
+        self.model.eval()
+
+    def _lidar_vector(self, obs):
+        data = obs.get("lidar") if obs else None
+        if self.ablate_lidar or not data or data.get("points") is None:
+            return np.zeros(self.n_sectors, dtype=np.float32)
+        sectors_m = points_to_sectors_m(data["points"], n_sectors=self.n_sectors,
+                                        max_range=self.max_range)
+        return normalize_sectors_m(sectors_m, self.max_range)
+
+    def __call__(self, obs):
+        img = obs.get("image") if obs else None
+        if img is None:
+            return 0.0, 0.0, 0.0
+        x = preprocess(img)
+        lidar = self._lidar_vector(obs)
+        with torch.no_grad():
+            xt = torch.from_numpy(x).unsqueeze(0).to(self.device)
+            lt = torch.from_numpy(lidar).unsqueeze(0).to(self.device)
+            out = self.model(xt, lt).cpu().numpy().ravel()
+        steer, throttle, brake = float(out[0]), float(out[1]), float(out[2])
+        if brake < self.brake_eps:
+            throttle = max(throttle, self.throttle_floor)
+        return steer, throttle, brake
