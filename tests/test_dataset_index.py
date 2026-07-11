@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from ai.dataset_writer import EpisodeWriter
-from ai.dataset_index import list_episodes, split_episodes, build_index, sample_weights
+from ai.dataset_index import list_episodes, split_episodes, build_index, sample_weights, sample_weights_dual
 
 
 def _make_episode(path, steers):
@@ -50,3 +50,13 @@ def test_sample_weights_upweight_curves():
     steers = [0.0, 0.01, 0.5, -0.4]  # 2 straight, 2 curve
     w = sample_weights(steers, straight_thr=0.05, straight_w=1.0, curve_w=3.0)
     assert list(w) == [1.0, 1.0, 3.0, 3.0]
+
+
+def test_sample_weights_dual_upweights_curve_and_brake():
+    steers = [0.0, 0.5, 0.0, 0.5]
+    brakes = [0.0, 0.0, 0.8, 0.8]
+    w = sample_weights_dual(steers, brakes, curve_w=3.0, brake_w=4.0)
+    assert w[0] == 1.0          # reto, sem freio
+    assert w[1] == 3.0          # curva
+    assert w[2] == 4.0          # freio
+    assert w[3] == 4.0          # curva + freio -> máximo dos dois

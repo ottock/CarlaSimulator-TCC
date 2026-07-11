@@ -61,3 +61,17 @@ def sample_weights(steers, straight_thr=0.05, straight_w=1.0, curve_w=3.0):
     """Per-sample weights for a WeightedRandomSampler: upweight curves."""
     s = np.abs(np.asarray(steers, dtype=np.float64))
     return np.where(s < straight_thr, straight_w, curve_w).astype(np.float64)
+
+
+def sample_weights_dual(steers, brakes, straight_thr=0.05, brake_thr=0.05,
+                        straight_w=1.0, curve_w=3.0, brake_w=3.0):
+    """Per-sample weights combining two imbalances: curves and braking.
+
+    Both curves (|steer| high) and braking frames (brake high) are rare; a frame
+    that is either gets upweighted. Weight = max(curve weight, brake weight).
+    """
+    s = np.abs(np.asarray(steers, dtype=np.float64))
+    b = np.asarray(brakes, dtype=np.float64)
+    curve = np.where(s < straight_thr, straight_w, curve_w)
+    brake = np.where(b < brake_thr, straight_w, brake_w)
+    return np.maximum(curve, brake).astype(np.float64)
