@@ -86,3 +86,16 @@ def test_normalized_is_meters_over_max_range():
     meters = scan_to_sectors_m(angles, dists, n_sectors=72, max_range=12.0)
     norm = scan_to_sectors(angles, dists, n_sectors=72, max_range=12.0)
     assert np.allclose(norm, meters / 12.0)
+
+
+def test_normalize_maps_metres_to_unit_range():
+    from ai.shared.lidar_pipeline import normalize_sectors_m
+    out = normalize_sectors_m(np.array([0.0, 6.0, 12.0], dtype=np.float32), max_range=12.0)
+    assert np.allclose(out, [0.0, 0.5, 1.0])
+    assert out.dtype == np.float32
+
+
+def test_normalize_clips_beyond_range():
+    from ai.shared.lidar_pipeline import normalize_sectors_m
+    out = normalize_sectors_m(np.array([-1.0, 24.0], dtype=np.float32), max_range=12.0)
+    assert np.allclose(out, [0.0, 1.0])  # clipa abaixo de 0 e acima de max_range

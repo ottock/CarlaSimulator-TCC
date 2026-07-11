@@ -57,3 +57,13 @@ def scan_to_sectors(angles_deg, dist_m, n_sectors=N_SECTORS, max_range=MAX_RANGE
     """
     meters = scan_to_sectors_m(angles_deg, dist_m, n_sectors=n_sectors, max_range=max_range)
     return (meters / max_range).astype(np.float32)
+
+
+def normalize_sectors_m(sectors_m, max_range=MAX_RANGE_M):
+    """Turn stored per-sector metres into model input in [0, 1] (near=0, free=1).
+
+    Single source of truth used by both training (``DrivingDataset``) and
+    inference (``DrivingPolicy``). Python 3.6-safe (runs on the Jetson too).
+    """
+    x = np.asarray(sectors_m, dtype=np.float32) / float(max_range)
+    return np.clip(x, 0.0, 1.0).astype(np.float32)
