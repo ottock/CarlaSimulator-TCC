@@ -20,12 +20,20 @@ import time
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-from ai.dataset import SteeringDataset
-from ai.dataset_index import build_index, list_episodes, sample_weights, split_episodes
+from ai.dataset import DrivingDataset, SteeringDataset
+from ai.dataset_index import (
+    build_index,
+    list_episodes,
+    sample_weights,
+    sample_weights_dual,
+    split_episodes,
+)
 from ai.metrics import mae, variance_ratio
-from ai.model import CameraSteeringNet
+from ai.model import CameraSteeringNet, DrivingNet
+from ai.warmstart import load_camera_backbone
 
 
 def _evaluate(model, loader, device):
@@ -106,6 +114,93 @@ def train(data_dir, out_path, epochs=40, batch=128, lr=1e-4, weight_decay=1e-5,
     print("best val_MAE=%.4f at epoch %d  ->  %s" % (best, best_epoch, out_path))
 
 
+def _evaluate_dual(model, loader, device):
+    """Return per-axis MAE (steer, throttle, brake) and steer var_ratio."""
+    model.eval()
+    preds, tgts = [], []
+    with torch.no_grad():
+        for img, lidar, y in loader:
+            out = model(img.to(device), lidar.to(device))
+            preds.append(out.cpu().numpy())
+            tgts.append(y.numpy())
+    p, t = np.concatenate(preds), np.concatenate(tgts)
+    maes = [mae(p[:, i], t[:, i]) for i in range(3)]
+    return maes[0], maes[1], maes[2], variance_ratio(p[:, 0], t[:, 0])
+
+
+def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4,
+               weight_decay=1e-5, dropout=0.3, val_frac=0.2, seed=0, workers=0,
+               limit=0, patience=6, w_steer=1.0, w_throttle=0.5, w_brake=1.0, device=None):
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    torch.manual_seed(seed)
+
+    episodes = list_episodes(data_dir)
+    if not episodes:
+        raise SystemExit("No ep_* episodes found in %s" % data_dir)
+    train_eps, val_eps = split_episodes(episodes, val_frac, seed)
+    train_index = build_index(train_eps)
+    val_index = build_index(val_eps)
+    if limit:
+        train_index = train_index[:limit]
+        val_index = val_index[:max(1, limit // 5)]
+    print("device=%s | episodes: %d train / %d val | frames: %d train / %d val"
+          % (device, len(train_eps), len(val_eps), len(train_index), len(val_index)))
+
+    w = sample_weights_dual([r["steer"] for r in train_index],
+                            [r["brake"] for r in train_index])
+    sampler = WeightedRandomSampler(torch.as_tensor(w, dtype=torch.double),
+                                    num_samples=len(w), replacement=True)
+    train_loader = DataLoader(DrivingDataset(train_index), batch_size=batch, sampler=sampler,
+                              num_workers=workers, pin_memory=True, drop_last=True)
+    val_loader = DataLoader(DrivingDataset(val_index), batch_size=batch, shuffle=False,
+                            num_workers=workers, pin_memory=True)
+
+    model = DrivingNet(dropout=dropout).to(device)
+    model(torch.zeros(1, 3, 66, 200, device=device), torch.zeros(1, 72, device=device))  # init lazy
+    if init_from:
+        n = load_camera_backbone(model, init_from, device=device)
+        print("warm-start: copied %d camera tensors from %s" % (n, init_from))
+
+    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
+    axis_w = torch.tensor([w_steer, w_throttle, w_brake], device=device)
+
+    best, best_epoch, since_best = float("inf"), 0, 0
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        t0, running, nb = time.time(), 0.0, 0
+        for img, lidar, y in train_loader:
+            img, lidar, y = img.to(device), lidar.to(device), y.to(device)
+            opt.zero_grad()
+            per = F.smooth_l1_loss(model(img, lidar), y, reduction="none")  # (B,3)
+            loss = (per * axis_w).mean()
+            loss.backward()
+            opt.step()
+            running += loss.item(); nb += 1
+        sched.step()
+        m_s, m_t, m_b, vr = _evaluate_dual(model, val_loader, device)
+        val_loss = w_steer * m_s + w_throttle * m_t + w_brake * m_b
+        flag = ""
+        if val_loss < best:
+            best, best_epoch, since_best = val_loss, epoch, 0
+            torch.save({"model_state_dict": model.state_dict(), "val_loss": val_loss,
+                        "mae_steer": m_s, "mae_throttle": m_t, "mae_brake": m_b,
+                        "var_ratio": vr, "epoch": epoch, "arch": "DrivingNet"}, out_path)
+            flag = " *"
+        else:
+            since_best += 1
+        print("epoch %2d/%d  train=%.4f  MAE s/t/b=%.4f/%.4f/%.4f  var=%.2f  (%.1fs)%s"
+              % (epoch, epochs, running / max(1, nb), m_s, m_t, m_b, vr, time.time() - t0, flag))
+        if since_best >= patience:
+            print("early stop (no val improvement for %d epochs)" % patience); break
+
+    print("best val_loss=%.4f at epoch %d  ->  %s" % (best, best_epoch, out_path))
+
+
 def main():
     p = argparse.ArgumentParser(description="Train camera-only steering model")
     p.add_argument("--data", required=True)
@@ -121,7 +216,18 @@ def main():
     p.add_argument("--limit", type=int, default=0, help="cap train frames (quick smoke runs)")
     p.add_argument("--patience", type=int, default=6)
     p.add_argument("--device", default=None)
+    p.add_argument("--dual", action="store_true", help="Train the dual-input DrivingNet (Fase 3)")
+    p.add_argument("--init-from", default=None, help="Camera checkpoint to warm-start from (cam_v2.pt)")
+    p.add_argument("--w-steer", type=float, default=1.0)
+    p.add_argument("--w-throttle", type=float, default=0.5)
+    p.add_argument("--w-brake", type=float, default=1.0)
     a = p.parse_args()
+    if a.dual:
+        train_dual(a.data, a.out, init_from=a.init_from, epochs=a.epochs, batch=a.batch,
+                   lr=a.lr, weight_decay=a.weight_decay, dropout=a.dropout, val_frac=a.val_frac,
+                   seed=a.seed, workers=a.workers, limit=a.limit, patience=a.patience,
+                   w_steer=a.w_steer, w_throttle=a.w_throttle, w_brake=a.w_brake, device=a.device)
+        return
     train(a.data, a.out, a.epochs, a.batch, a.lr, a.weight_decay, a.dropout,
           a.val_frac, a.seed, a.workers, a.limit, a.patience, a.device)
 
