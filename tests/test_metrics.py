@@ -61,3 +61,15 @@ def test_steer_jerk_measures_left_right_oscillation():
     # every consecutive step flips by 1.0 -> mean jerk 1.0; std of +/-0.5 is 0.5
     assert s["mean_steer_jerk"] == pytest.approx(1.0)
     assert s["steer_std"] == pytest.approx(0.5)
+
+
+def test_mae_is_mean_absolute_error():
+    from ai.metrics import mae
+    assert mae([1.0, 2.0, 3.0], [1.0, 2.0, 4.0]) == pytest.approx(1.0 / 3)
+
+
+def test_variance_ratio_detects_collapsed_predictions():
+    from ai.metrics import variance_ratio
+    # predictions with half the spread of the targets -> ratio 0.5 (catches "always straight")
+    assert variance_ratio([-0.5, 0.5], [-1.0, 1.0]) == pytest.approx(0.5)
+    assert variance_ratio([0.0, 0.0], [-1.0, 1.0]) == pytest.approx(0.0)

@@ -8,6 +8,28 @@ on identical numbers.
 import numpy as np
 
 
+def mae(pred, target):
+    """Mean absolute error between two 1-D sequences."""
+    p = np.asarray(pred, dtype=np.float64)
+    t = np.asarray(target, dtype=np.float64)
+    if p.size == 0:
+        return 0.0
+    return float(np.abs(p - t).mean())
+
+
+def variance_ratio(pred, target):
+    """std(pred) / std(target): a collapse detector for "model always goes straight".
+
+    A healthy steering model should keep most of the target's spread (>= ~0.6).
+    """
+    p = np.asarray(pred, dtype=np.float64)
+    t = np.asarray(target, dtype=np.float64)
+    ts = t.std()
+    if ts == 0:
+        return 0.0
+    return float(p.std() / ts)
+
+
 class RouteMetrics:
     """Accumulate per-step measurements and summarize one route."""
 

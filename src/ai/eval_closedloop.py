@@ -110,14 +110,24 @@ def read_observation(vehicle, sensors):
     return obs
 
 
+def _attach_collision_sensor(world, vehicle, actor_list):
+    """Attach a collision sensor to the ego. Returns a list that fills with events."""
+    bp = world.get_blueprint_library().find("sensor.other.collision")
+    sensor = world.spawn_actor(bp, carla.Transform(), attach_to=vehicle)
+    actor_list.append(sensor)
+    events = []
+    sensor.listen(lambda e: events.append(e))
+    return events
+
+
 def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
                     realtime=False, follow=True, launch=True, quality="Low", seed=0,
-                    autopilot=False):
+                    autopilot=False, model_ckpt=None, model_throttle=0.35):
     """Drive the ego in closed loop and report per-route metrics.
 
-    ``autopilot=True`` uses CARLA's Traffic Manager (the smooth reference driver);
-    otherwise the injectable ``ExpertPolicy`` drives (the slot the model plugs
-    into from Fase 2).
+    Driver precedence: ``autopilot=True`` uses CARLA's Traffic Manager (smooth
+    reference); else ``model_ckpt`` drives with the trained model (Fase 2); else
+    the ``ExpertPolicy`` drives. Model and expert share the same policy slot.
     """
     settings = load_settings(settings_path)
     carla_config = settings.get("carla_client", {})
@@ -153,8 +163,15 @@ def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
             for _ in range(10):
                 world.tick()
 
+            collision_events = _attach_collision_sensor(world, vehicle, actor_list)
+
             if not autopilot:
-                policy = ExpertPolicy(world, vehicle, target_speed_kmh=target_speed_kmh, seed=seed)
+                if model_ckpt:
+                    from ai.model_policy import ModelSteeringPolicy
+                    policy = ModelSteeringPolicy(model_ckpt, throttle=model_throttle)
+                    logger.info("Driving with trained model: %s", model_ckpt)
+                else:
+                    policy = ExpertPolicy(world, vehicle, target_speed_kmh=target_speed_kmh, seed=seed)
             spectator_state = (
                 setup_spectator_follow_vehicle(world, vehicle, mode="behind") if follow else {}
             )
@@ -163,8 +180,10 @@ def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
             all_summaries = []
             for route in range(1, routes + 1):
                 metrics = RouteMetrics()
+                col_start = len(collision_events)
+                first_col_step = None
                 logger.info("=== Route %d/%d (%d steps) ===", route, routes, steps_per_route)
-                for _ in range(steps_per_route):
+                for step in range(steps_per_route):
                     tick_start = time.perf_counter()
 
                     if autopilot:
@@ -184,19 +203,25 @@ def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
                     departed = (not is_junction) and (deviation > lane_width / 2.0)
                     metrics.add(deviation, _speed_ms(vehicle), departed, steer=steer)
 
+                    if first_col_step is None and len(collision_events) > col_start:
+                        first_col_step = step
+
                     if realtime:
                         remaining = fixed_delta - (time.perf_counter() - tick_start)
                         if remaining > 0:
                             time.sleep(remaining)
 
                 summary = metrics.summary()
+                summary["collisions"] = len(collision_events) - col_start
+                summary["first_col_s"] = first_col_step * fixed_delta if first_col_step is not None else -1.0
                 all_summaries.append(summary)
                 logger.info(
-                    "Route %d done: mean_dev=%.2fm p95=%.2fm max=%.2fm offlane=%d "
-                    "mean_speed=%.1fm/s steer_jerk=%.4f steer_std=%.3f",
+                    "Route %d done: mean_dev=%.2fm p95=%.2fm max=%.2fm offlane=%d collisions=%d "
+                    "mean_speed=%.1fm/s steer_std=%.3f%s",
                     route, summary["mean_dev"], summary["p95_dev"], summary["max_dev"],
-                    summary["offlane"], summary["mean_speed"],
-                    summary["mean_steer_jerk"], summary["steer_std"],
+                    summary["offlane"], summary["collisions"], summary["mean_speed"],
+                    summary["steer_std"],
+                    ("  <-- FIRST COLLISION @ %.1fs" % summary["first_col_s"]) if summary["collisions"] else "",
                 )
 
             _print_verdict(all_summaries)
@@ -206,16 +231,18 @@ def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
 
 
 def _print_verdict(summaries):
-    """Print a Fase-0 pass/fail verdict against the approval criteria."""
-    clean = sum(1 for s in summaries if s["offlane"] == 0)
+    """Print a pass/fail verdict: a clean route has no lane departures AND no collisions."""
+    clean = sum(1 for s in summaries if s["offlane"] == 0 and s.get("collisions", 0) == 0)
+    total_col = sum(s.get("collisions", 0) for s in summaries)
     worst = max((s["max_dev"] for s in summaries), default=0.0)
     logger.info("---------------------------------------------")
-    logger.info("SUMMARY: %d/%d routes with zero off-lane steps; worst max deviation %.2f m",
-                clean, len(summaries), worst)
+    logger.info("SUMMARY: %d/%d clean routes (no off-lane, no collision); worst max deviation %.2f m; "
+                "total collision events %d", clean, len(summaries), worst, total_col)
     if summaries and clean == len(summaries):
-        logger.info("FASE 0 CRITERION MET: expert drove every route without leaving the lane.")
+        logger.info("CRITERION MET: drove every route with no lane departures and NO collisions.")
     else:
-        logger.info("FASE 0 CRITERION NOT MET: some routes had off-lane steps (see above).")
+        logger.info("CRITERION NOT MET: %d route(s) had a lane departure or collision (see above).",
+                    len(summaries) - clean)
 
 
 def main():
@@ -231,6 +258,10 @@ def main():
     parser.add_argument("--seed", type=int, default=0, help="RNG seed for destinations")
     parser.add_argument("--autopilot", action="store_true",
                         help="Use CARLA's Traffic Manager (smooth reference driver) instead of the policy")
+    parser.add_argument("--model", default=None,
+                        help="Checkpoint .pt to drive with (the trained model) instead of the expert")
+    parser.add_argument("--model-throttle", type=float, default=0.35,
+                        help="Fixed throttle when driving with the camera-only model")
     args = parser.parse_args()
 
     run_closed_loop(
@@ -244,6 +275,8 @@ def main():
         quality=args.quality,
         seed=args.seed,
         autopilot=args.autopilot,
+        model_ckpt=args.model,
+        model_throttle=args.model_throttle,
     )
 
 
