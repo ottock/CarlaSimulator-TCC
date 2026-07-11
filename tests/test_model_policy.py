@@ -5,6 +5,7 @@ so it drops into the existing harness. Camera-only: the model sets steering; a
 fixed throttle keeps the car moving so lane-keeping can be judged.
 """
 import numpy as np
+import pytest
 import torch
 
 from ai.model import CameraSteeringNet
@@ -64,9 +65,26 @@ def test_driving_policy_no_image_is_safe(tmp_path):
     assert pol({"image": None, "lidar": None}) == (0.0, 0.0, 0.0)
 
 
-def test_driving_policy_throttle_floor(tmp_path):
+def test_driving_policy_throttle_floor_applied_when_not_braking(tmp_path):
     ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
-    pol = DrivingPolicy(str(ckpt), device="cpu", throttle_floor=0.4)
+    pol = DrivingPolicy(str(ckpt), device="cpu", throttle_floor=0.4, brake_eps=0.05)
+    pol.model = lambda xt, lt: torch.tensor([[0.1, 0.0, 0.0]])  # brake=0.0 < eps
     steer, throttle, brake = pol(_fake_obs())
-    if brake < 0.05:
-        assert throttle >= 0.4  # piso aplicado quando não está freando
+    assert brake < 0.05
+    assert throttle == pytest.approx(0.4)  # floor applied
+
+
+def test_driving_policy_throttle_floor_not_applied_when_braking(tmp_path):
+    ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
+    pol = DrivingPolicy(str(ckpt), device="cpu", throttle_floor=0.4, brake_eps=0.05)
+    pol.model = lambda xt, lt: torch.tensor([[0.0, 0.0, 0.9]])  # brake=0.9 >= eps
+    steer, throttle, brake = pol(_fake_obs())
+    assert throttle == pytest.approx(0.0)  # floor NOT applied
+
+
+def test_driving_policy_ablate_lidar_zeros_vector(tmp_path):
+    ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
+    pol = DrivingPolicy(str(ckpt), device="cpu", ablate_lidar=True)
+    vec = pol._lidar_vector(_fake_obs())
+    assert vec.shape == (72,)
+    assert float(vec.max()) == 0.0  # LiDAR zeroed under ablation
