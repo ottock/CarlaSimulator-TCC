@@ -129,13 +129,14 @@ confirmar que há sinal suficiente antes de treinar.
   frente do ego na mesma faixa e medir. **Aprovado quando o ego para atrás sem colidir em ≥8/10
   seeds**, mantendo lane-keeping em pista livre. Reusar o sensor de colisão já existente
   (`_attach_collision_sensor`).
-- **Ablation** (exigência do plano): rodar **o mesmo modelo** com o vetor de LiDAR **zerado** nos
-  mesmos seeds → deve colidir/parar pior. Prova que o LiDAR está sendo usado (e não a câmera
-  sozinha). Registrar a tabela com/sem LiDAR.
+- **Ablation** (exigência do plano): rodar **o mesmo modelo** com o vetor de LiDAR **"livre"
+  (ones = pista limpa)** nos mesmos seeds → deve colidir/parar pior. Prova que o LiDAR está sendo
+  usado (e não a câmera sozinha). Registrar a tabela com/sem LiDAR. (Na convenção `near=0/free=1`,
+  o sinal neutro de "sem obstáculo" é `ones`; um vetor zerado significaria "obstáculo em tudo".)
 
 ### 7. Testes (pytest, sem servidor CARLA)
 
-- `DrivingNet`: shapes de entrada/saída; forward com LiDAR zerado não quebra (caminho da ablation).
+- `DrivingNet`: shapes de entrada/saída; forward com LiDAR extremo (vetor de zeros) não quebra.
 - Padding circular do braço de LiDAR: setor 0 e 71 tratados como vizinhos (teste de invariância a
   deslocamento simples).
 - `DrivingDataset`: alinhamento img↔lidar↔label (frame `k` puxa a linha `k` do `.npy`); shapes e
@@ -167,7 +168,7 @@ confirmar que há sinal suficiente antes de treinar.
   dual.
 - `src/ai/model_policy.py` — adicionar `DrivingPolicy` (mantém `ModelSteeringPolicy`).
 - `src/ai/eval_openloop.py` — métricas por eixo.
-- `src/ai/eval_closedloop.py` — cenário com veículo à frente + suporte a ablation (LiDAR zerado).
+- `src/ai/eval_closedloop.py` — cenário com veículo à frente + suporte a ablation (LiDAR livre/ones).
 - `docs/ESTADO_IA.md` — atualizar estado ao fim da fase.
 
 **Criar:**

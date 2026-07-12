@@ -711,7 +711,7 @@ git commit -m "feat(ai): train_dual — treino dual-input com warm-start, loss m
 
 **Interfaces:**
 - Consumes: `DrivingNet` (Task 2), `normalize_sectors_m` (Task 1), `points_to_sectors_m` (existente em `ai.sim_lidar`), `preprocess` (existente).
-- Produces: `DrivingPolicy(ckpt_path, device=None, throttle_floor=0.0, brake_eps=0.05, n_sectors=72, max_range=12.0, ablate_lidar=False)`; `__call__(obs) -> (steer, throttle, brake)`. `obs` tem `image` (BGR HxWx3 uint8 ou None) e `lidar` (dict com `points` (N,3) ou None). Com `image=None` retorna `(0.0, 0.0, 0.0)`. Com `ablate_lidar=True` alimenta o LiDAR zerado (para a ablation).
+- Produces: `DrivingPolicy(ckpt_path, device=None, throttle_floor=0.0, brake_eps=0.05, n_sectors=72, max_range=12.0, ablate_lidar=False)`; `__call__(obs) -> (steer, throttle, brake)`. `obs` tem `image` (BGR HxWx3 uint8 ou None) e `lidar` (dict com `points` (N,3) ou None). Com `image=None` retorna `(0.0, 0.0, 0.0)`. Com `ablate_lidar=True` alimenta o LiDAR **livre (ones = pista limpa)** (para a ablation; na convenção near=0/free=1, zeros seria "obstáculo em tudo").
 
 - [ ] **Step 1: Escrever os testes que falham**
 
@@ -799,7 +799,9 @@ class DrivingPolicy:
     def _lidar_vector(self, obs):
         data = obs.get("lidar") if obs else None
         if self.ablate_lidar or not data or data.get("points") is None:
-            return np.zeros(self.n_sectors, dtype=np.float32)
+            # near=0/free=1: ones = "pista limpa" é o sinal neutro sem-LiDAR
+            # (ablation + fallback sem nuvem); zeros significaria "obstáculo em tudo".
+            return np.ones(self.n_sectors, dtype=np.float32)
         sectors_m = points_to_sectors_m(data["points"], n_sectors=self.n_sectors,
                                         max_range=self.max_range)
         return normalize_sectors_m(sectors_m, self.max_range)
@@ -1091,7 +1093,7 @@ Adicionar em `main()`:
 ```python
     parser.add_argument("--traffic", type=int, default=0, help="Spawn N autopilot vehicles")
     parser.add_argument("--ablate-lidar", action="store_true",
-                        help="Zero the LiDAR input (ablation: prove the model uses it)")
+                        help="Feed the LiDAR as free/clear (ones) — ablation: prove the model uses it")
 ```
 
 E repassar `traffic=args.traffic, ablate_lidar=args.ablate_lidar` na chamada a `run_closed_loop(...)`.

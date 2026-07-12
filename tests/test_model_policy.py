@@ -82,9 +82,9 @@ def test_driving_policy_throttle_floor_not_applied_when_braking(tmp_path):
     assert throttle == pytest.approx(0.0)  # floor NOT applied
 
 
-def test_driving_policy_ablate_lidar_zeros_vector(tmp_path):
+def test_driving_policy_ablate_lidar_free_vector(tmp_path):
     ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
     pol = DrivingPolicy(str(ckpt), device="cpu", ablate_lidar=True)
     vec = pol._lidar_vector(_fake_obs())
     assert vec.shape == (72,)
-    assert float(vec.max()) == 0.0  # LiDAR zeroed under ablation
+    assert bool(np.all(vec == 1.0))  # ablation feeds "clear road" (free), not "obstacle everywhere"

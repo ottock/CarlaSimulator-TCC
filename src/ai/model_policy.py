@@ -61,7 +61,13 @@ class DrivingPolicy:
     def _lidar_vector(self, obs):
         data = obs.get("lidar") if obs else None
         if self.ablate_lidar or not data or data.get("points") is None:
-            return np.zeros(self.n_sectors, dtype=np.float32)
+            # normalize_sectors_m uses near=0/free=1: an all-ones vector means
+            # "clear road in every direction", the neutral no-LiDAR signal for
+            # both the ablation experiment and the missing-cloud fallback.
+            # Zeros would instead mean "obstacle in every direction", which is
+            # wrong here and inconsistent with how empty clouds are stored at
+            # collection time (see ai.sim_lidar / ai.shared.lidar_pipeline).
+            return np.ones(self.n_sectors, dtype=np.float32)
         sectors_m = points_to_sectors_m(data["points"], n_sectors=self.n_sectors,
                                         max_range=self.max_range)
         return normalize_sectors_m(sectors_m, self.max_range)
