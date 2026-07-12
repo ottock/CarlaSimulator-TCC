@@ -45,6 +45,7 @@ from core.carlaClient.world_manager import (
     connect_to_carla,
     simulation_context,
     spawn_actor_vehicle,
+    spawn_random_vehicles,
     setup_spectator_follow_vehicle,
     update_spectator_position,
 )
@@ -97,7 +98,7 @@ def _teleport_offcenter(world, vehicle, rng, max_lat, max_yaw):
 
 
 def collect(settings_path, out_dir, episodes, seconds, slow_pct=0.0,
-            realtime=False, follow=True, launch=True, quality="Low",
+            realtime=False, follow=True, launch=True, quality="Low", traffic=0,
             recovery=False, recovery_every=2.5, recovery_lat=0.8, recovery_yaw=18.0, seed=0):
     """Run the collection loop (TM autopilot expert) and write a dataset to ``out_dir``.
 
@@ -121,6 +122,7 @@ def collect(settings_path, out_dir, episodes, seconds, slow_pct=0.0,
                           "z_min": -1.7, "z_max": 2.0, "min_range": 0.5},
         "recovery": ({"every_s": recovery_every, "lat_m": recovery_lat, "yaw_deg": recovery_yaw}
                      if recovery else None),
+        "traffic": traffic,
         "label_columns": LABEL_COLUMNS,
     })
 
@@ -145,6 +147,12 @@ def collect(settings_path, out_dir, episodes, seconds, slow_pct=0.0,
                 world, actor_list, actor_cfg, traffic_manager, ignore_traffic_lights=True)
             for _ in range(10):
                 world.tick()
+
+            if traffic:
+                spawned = spawn_random_vehicles(world, actor_list, traffic, traffic_manager)
+                for _ in range(10):
+                    world.tick()  # deixa o tráfego assentar e o autopilot assumir
+                logger.info("Traffic: %d vehicles spawned", len(spawned))
 
             spectator_state = (
                 setup_spectator_follow_vehicle(world, vehicle, mode="behind") if follow else {}
@@ -223,6 +231,8 @@ def main():
     parser.add_argument("--no-follow", action="store_true")
     parser.add_argument("--no-launch", action="store_true")
     parser.add_argument("--quality", default="Low")
+    parser.add_argument("--traffic", type=int, default=0,
+                        help="Spawn N autopilot vehicles to create braking events")
     parser.add_argument("--recovery", action="store_true",
                         help="Periodically nudge the ego off-centre and record the autopilot recovering")
     parser.add_argument("--recovery-every", type=float, default=2.5, help="Seconds between nudges")
@@ -239,6 +249,7 @@ def main():
         settings_path=args.settings, out_dir=args.out, episodes=args.episodes,
         seconds=args.seconds, slow_pct=args.slow, realtime=args.realtime,
         follow=not args.no_follow, launch=not args.no_launch, quality=args.quality,
+        traffic=args.traffic,
         recovery=args.recovery, recovery_every=args.recovery_every,
         recovery_lat=args.recovery_lat, recovery_yaw=args.recovery_yaw, seed=args.seed,
     )
