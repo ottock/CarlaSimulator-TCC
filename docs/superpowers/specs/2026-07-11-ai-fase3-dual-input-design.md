@@ -85,8 +85,16 @@ lidar (B, 72)         ─► LidarArm (Conv1D×2–3, padding circular) ─► f
 - O **autopilot do TM freia sozinho** atrás do veículo da frente (respeita
   `global_distance_to_leading_vehicle`) → os `throttle`/`brake` lidos de `vehicle.get_control()`
   são os **rótulos longitudinais do expert**. Nada de novo no writer.
-- Mantém `--recovery` (dados de recuperação lateral da direção) ligável junto.
+- Mantém `--recovery` (dados de recuperação lateral da direção) ligável junto. A recuperação
+  agora só teleporta **com o carro em movimento** e a cada 5 s (não mexe no carro parado freando
+  atrás de tráfego).
 - `--slow` continua útil para dar tempo de reação. Registrar `traffic: N` no `meta.json`.
+
+> **Comportamento conhecido (2026-07-12):** com bastante dado de recuperação, o modelo aprende o
+> micro-corrigir como baseline e faz um leve *wiggle* (vai-e-vem) mesmo em reta. **Inofensivo**
+> (desvio ~0.1 m, sem falhas); correção **adiada**. Se for remover: menos recuperação / passe de
+> direção mais limpo / penalizar steer-jerk no treino — sem cortar recuperação cegamente (ela é o
+> que levou a Fase 2 de 12.7 s → 171 s).
 - Produz **`dataset_v3`** (com tráfego). Datasets antigos (v1/v2, sem tráfego) seguem válidos
   para a parte de direção.
 
