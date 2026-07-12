@@ -34,6 +34,7 @@ from core.carlaClient.world_manager import (
     connect_to_carla,
     simulation_context,
     spawn_actor_vehicle,
+    spawn_random_vehicles,
     setup_spectator_follow_vehicle,
     update_spectator_position,
 )
@@ -122,7 +123,8 @@ def _attach_collision_sensor(world, vehicle, actor_list):
 
 def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
                     realtime=False, follow=True, launch=True, quality="Low", seed=0,
-                    autopilot=False, model_ckpt=None, model_throttle=0.35):
+                    autopilot=False, model_ckpt=None, model_throttle=0.35,
+                    traffic=0, ablate_lidar=False):
     """Drive the ego in closed loop and report per-route metrics.
 
     Driver precedence: ``autopilot=True`` uses CARLA's Traffic Manager (smooth
@@ -163,13 +165,29 @@ def run_closed_loop(settings_path, routes, seconds, target_speed_kmh,
             for _ in range(10):
                 world.tick()
 
+            if traffic:
+                tm_traffic = client.get_trafficmanager(tm_port)
+                tm_traffic.set_synchronous_mode(True)
+                spawn_random_vehicles(world, actor_list, traffic, tm_traffic)
+                for _ in range(10):
+                    world.tick()
+                logger.info("Traffic: %d vehicles spawned", traffic)
+
             collision_events = _attach_collision_sensor(world, vehicle, actor_list)
 
             if not autopilot:
                 if model_ckpt:
-                    from ai.model_policy import ModelSteeringPolicy
-                    policy = ModelSteeringPolicy(model_ckpt, throttle=model_throttle)
-                    logger.info("Driving with trained model: %s", model_ckpt)
+                    import torch
+                    arch = torch.load(model_ckpt, map_location="cpu", weights_only=False).get("arch")
+                    if arch == "DrivingNet":
+                        from ai.model_policy import DrivingPolicy
+                        policy = DrivingPolicy(model_ckpt, ablate_lidar=ablate_lidar)
+                        logger.info("Driving with DrivingNet%s: %s",
+                                    " (LiDAR ABLATED)" if ablate_lidar else "", model_ckpt)
+                    else:
+                        from ai.model_policy import ModelSteeringPolicy
+                        policy = ModelSteeringPolicy(model_ckpt, throttle=model_throttle)
+                        logger.info("Driving with camera model: %s", model_ckpt)
                 else:
                     policy = ExpertPolicy(world, vehicle, target_speed_kmh=target_speed_kmh, seed=seed)
             spectator_state = (
@@ -262,6 +280,9 @@ def main():
                         help="Checkpoint .pt to drive with (the trained model) instead of the expert")
     parser.add_argument("--model-throttle", type=float, default=0.35,
                         help="Fixed throttle when driving with the camera-only model")
+    parser.add_argument("--traffic", type=int, default=0, help="Spawn N autopilot vehicles")
+    parser.add_argument("--ablate-lidar", action="store_true",
+                        help="Feed the LiDAR as free/clear (ones) — ablation: prove the model uses it")
     args = parser.parse_args()
 
     run_closed_loop(
@@ -277,6 +298,8 @@ def main():
         autopilot=args.autopilot,
         model_ckpt=args.model,
         model_throttle=args.model_throttle,
+        traffic=args.traffic,
+        ablate_lidar=args.ablate_lidar,
     )
 
 
