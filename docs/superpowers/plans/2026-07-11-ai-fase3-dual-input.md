@@ -711,7 +711,7 @@ git commit -m "feat(ai): train_dual — treino dual-input com warm-start, loss m
 
 **Interfaces:**
 - Consumes: `DrivingNet` (Task 2), `normalize_sectors_m` (Task 1), `points_to_sectors_m` (existente em `ai.sim_lidar`), `preprocess` (existente).
-- Produces: `DrivingPolicy(ckpt_path, device=None, throttle_floor=0.0, brake_eps=0.05, n_sectors=72, max_range=12.0, ablate_lidar=False)`; `__call__(obs) -> (steer, throttle, brake)`. `obs` tem `image` (BGR HxWx3 uint8 ou None) e `lidar` (dict com `points` (N,3) ou None). Com `image=None` retorna `(0.0, 0.0, 0.0)`. Com `ablate_lidar=True` alimenta o LiDAR **livre (ones = pista limpa)** (para a ablation; na convenção near=0/free=1, zeros seria "obstáculo em tudo").
+- Produces: `DrivingPolicy(ckpt_path, device=None, throttle_floor=0.0, brake_deadzone=0.1, n_sectors=72, max_range=12.0, ablate_lidar=False)`; `__call__(obs) -> (steer, throttle, brake)`. `obs` tem `image` (BGR HxWx3 uint8 ou None) e `lidar` (dict com `points` (N,3) ou None). Com `image=None` retorna `(0.0, 0.0, 0.0)`. Com `ablate_lidar=True` alimenta o LiDAR **livre (ones = pista limpa)** (para a ablation; na convenção near=0/free=1, zeros seria "obstáculo em tudo"). **Deadzone de freio:** se `brake < brake_deadzone` zera o freio (o brake residual do modelo segurava o carro parado); se `brake ≥ deadzone`, throttle vai a 0 (mutuamente exclusivos).
 
 - [ ] **Step 1: Escrever os testes que falham**
 
@@ -781,11 +781,11 @@ class DrivingPolicy:
     then normalized with the SAME function used in training.
     """
 
-    def __init__(self, ckpt_path, device=None, throttle_floor=0.0, brake_eps=0.05,
+    def __init__(self, ckpt_path, device=None, throttle_floor=0.0, brake_deadzone=0.1,
                  n_sectors=72, max_range=12.0, ablate_lidar=False):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.throttle_floor = throttle_floor
-        self.brake_eps = brake_eps
+        self.brake_deadzone = brake_deadzone
         self.n_sectors = n_sectors
         self.max_range = max_range
         self.ablate_lidar = ablate_lidar
@@ -817,8 +817,14 @@ class DrivingPolicy:
             lt = torch.from_numpy(lidar).unsqueeze(0).to(self.device)
             out = self.model(xt, lt).cpu().numpy().ravel()
         steer, throttle, brake = float(out[0]), float(out[1]), float(out[2])
-        if brake < self.brake_eps:
+        # brake e throttle mutuamente exclusivos; brake residual (~0.02) junto com
+        # throttle segura o carro parado. Abaixo do deadzone zera o freio (e aplica
+        # o piso de throttle); no/acima do deadzone freia de verdade e corta o throttle.
+        if brake < self.brake_deadzone:
+            brake = 0.0
             throttle = max(throttle, self.throttle_floor)
+        else:
+            throttle = 0.0
         return steer, throttle, brake
 ```
 

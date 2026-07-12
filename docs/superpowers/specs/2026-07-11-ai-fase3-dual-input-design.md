@@ -117,10 +117,14 @@ confirmar que há sinal suficiente antes de treinar.
   `sim_lidar.points_to_sectors_m` (**mesma** função da coleta) → normaliza → modelo →
   `(steer, throttle, brake)`.
 - `ModelSteeringPolicy` (Fase 2, throttle fixo) **permanece** para comparação.
-- **Piso de throttle (mitigação):** se o modelo pedir throttle muito baixo com `brake≈0` em pista
-  livre, o carro pode arrastar. Se isso aparecer na validação, aplicar um piso simples
-  (`throttle = max(pred, cruise_min)` quando `brake < ε`). Fica como parâmetro, desligado por
-  padrão; só liga se o sintoma aparecer.
+- **Deadzone de freio + exclusão mútua (essencial):** o head de freio nunca regride exato a 0;
+  um `brake` residual (~0.02) aplicado junto com o throttle **segura o carro parado na partida**
+  (confirmado em malha fechada — o carro não saía do lugar). Regra: se `brake < brake_deadzone`
+  (padrão 0.1), zera o freio; se `brake ≥ deadzone`, é freada de verdade e o throttle vai a 0
+  (throttle e brake são mutuamente exclusivos).
+- **Piso de throttle (mitigação opcional):** se o modelo pedir throttle baixo em pista livre
+  (sem freio), o carro pode arrastar. Parâmetro `throttle_floor` (`throttle = max(pred, floor)`
+  quando não está freando), desligado por padrão; liga se o sintoma aparecer.
 
 ### 6. Avaliação — `src/ai/eval_openloop.py` e `src/ai/eval_closedloop.py`
 

@@ -65,21 +65,35 @@ def test_driving_policy_no_image_is_safe(tmp_path):
     assert pol({"image": None, "lidar": None}) == (0.0, 0.0, 0.0)
 
 
+def test_driving_policy_residual_brake_deadzoned(tmp_path):
+    # The brake head never regresses exactly to 0; a tiny residual brake applied
+    # together with throttle holds the car at a standstill. Below the deadzone the
+    # brake must be dropped so throttle can move the car.
+    ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
+    pol = DrivingPolicy(str(ckpt), device="cpu", brake_deadzone=0.1)
+    pol.model = lambda xt, lt: torch.tensor([[0.0, 0.35, 0.03]])  # residual brake < deadzone
+    steer, throttle, brake = pol(_fake_obs())
+    assert brake == 0.0                       # residual brake dropped
+    assert throttle == pytest.approx(0.35)    # throttle preserved so the car moves
+
+
 def test_driving_policy_throttle_floor_applied_when_not_braking(tmp_path):
     ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
-    pol = DrivingPolicy(str(ckpt), device="cpu", throttle_floor=0.4, brake_eps=0.05)
-    pol.model = lambda xt, lt: torch.tensor([[0.1, 0.0, 0.0]])  # brake=0.0 < eps
+    pol = DrivingPolicy(str(ckpt), device="cpu", throttle_floor=0.4, brake_deadzone=0.1)
+    pol.model = lambda xt, lt: torch.tensor([[0.1, 0.0, 0.0]])  # brake=0.0 < deadzone
     steer, throttle, brake = pol(_fake_obs())
-    assert brake < 0.05
-    assert throttle == pytest.approx(0.4)  # floor applied
+    assert brake == 0.0
+    assert throttle == pytest.approx(0.4)     # floor applied when not braking
 
 
-def test_driving_policy_throttle_floor_not_applied_when_braking(tmp_path):
+def test_driving_policy_braking_cuts_throttle(tmp_path):
+    # Real braking (>= deadzone) and throttle are mutually exclusive.
     ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
-    pol = DrivingPolicy(str(ckpt), device="cpu", throttle_floor=0.4, brake_eps=0.05)
-    pol.model = lambda xt, lt: torch.tensor([[0.0, 0.0, 0.9]])  # brake=0.9 >= eps
+    pol = DrivingPolicy(str(ckpt), device="cpu", throttle_floor=0.4, brake_deadzone=0.1)
+    pol.model = lambda xt, lt: torch.tensor([[0.0, 0.6, 0.9]])  # brake=0.9 >= deadzone
     steer, throttle, brake = pol(_fake_obs())
-    assert throttle == pytest.approx(0.0)  # floor NOT applied
+    assert brake == pytest.approx(0.9)
+    assert throttle == pytest.approx(0.0)     # throttle cut during real braking
 
 
 def test_driving_policy_ablate_lidar_free_vector(tmp_path):
