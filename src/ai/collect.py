@@ -70,13 +70,17 @@ def _lidar_points(obs):
     return np.zeros((0, 3), dtype=np.float32)
 
 
-def _teleport_offcenter(world, vehicle, rng, max_lat, max_yaw):
+def _teleport_offcenter(world, vehicle, rng, max_lat, max_yaw, min_speed=2.0):
     """Nudge the ego off the lane centre (lateral + heading) on straight road.
 
-    The autopilot then steers back to centre, so the frames right after become
-    recovery examples (off-centre image + corrective steer). Returns True if a
-    teleport happened (skipped inside junctions, where 'centre' is ambiguous).
+    Only fires while the ego is MOVING (speed >= ``min_speed`` m/s): a stopped
+    car — e.g. braking behind traffic — must stay put, otherwise the nudge
+    corrupts the braking example and fights the stop. The autopilot then steers
+    back to centre, so the frames right after become recovery examples. Returns
+    True if a teleport happened (skipped when stopped or inside junctions).
     """
+    if _speed_ms(vehicle) < min_speed:
+        return False
     wp = world.get_map().get_waypoint(
         vehicle.get_location(), project_to_road=True, lane_type=carla.LaneType.Driving)
     if wp is None or wp.is_junction:
@@ -99,7 +103,7 @@ def _teleport_offcenter(world, vehicle, rng, max_lat, max_yaw):
 
 def collect(settings_path, out_dir, episodes, seconds, slow_pct=0.0,
             realtime=False, follow=True, launch=True, quality="Low", traffic=0,
-            recovery=False, recovery_every=2.5, recovery_lat=0.8, recovery_yaw=18.0, seed=0):
+            recovery=False, recovery_every=5.0, recovery_lat=0.8, recovery_yaw=18.0, seed=0):
     """Run the collection loop (TM autopilot expert) and write a dataset to ``out_dir``.
 
     With ``recovery=True``, the ego is periodically nudged off-centre so the
@@ -235,7 +239,8 @@ def main():
                         help="Spawn N autopilot vehicles to create braking events")
     parser.add_argument("--recovery", action="store_true",
                         help="Periodically nudge the ego off-centre and record the autopilot recovering")
-    parser.add_argument("--recovery-every", type=float, default=2.5, help="Seconds between nudges")
+    parser.add_argument("--recovery-every", type=float, default=5.0,
+                        help="Seconds between nudges (only while the ego is moving)")
     parser.add_argument("--recovery-lat", type=float, default=0.8, help="Max lateral nudge (m)")
     parser.add_argument("--recovery-yaw", type=float, default=18.0, help="Max heading nudge (deg)")
     parser.add_argument("--seed", type=int, default=0)
