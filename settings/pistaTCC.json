@@ -5,7 +5,7 @@
         "timeout": 20.0,
         "max_retries": 3,
         "retry_delay": 2,
-        "server_boot_time": 100
+        "server_boot_time": 60
     },
 
     "world": {
@@ -21,9 +21,25 @@
             "z": 0.05,
             "unload_layers": true,
             "obstacles": {
-                "count": 6,
+                "count": 0,
                 "types": ["tcc_cone", "tcc_mureta", "tcc_pessoa2d"],
                 "margem_lateral": 0.12
+            },
+            "professor": {
+                "enabled": true,
+                "vehicle_filter": "vehicle.tesla.model3",
+                "laps": 0,
+                "max_steps": 0,
+                "target_speed": 5.0,
+                "lookahead": 4.0,
+                "k_throttle": 0.5,
+                "max_steer_deg": 70.0,
+                "espacamento": 0.5,
+                "log": false,
+                "log_every": 1,
+                "dataset_dir": "dataset",
+                "camera": { "width": 800, "height": 600, "fov": 90, "x": 1.5, "z": 1.4, "pitch": -15.0 },
+                "lidar": { "channels": 32, "range": 100 }
             }
         },
 

@@ -1,17 +1,33 @@
+# Anotacoes "preguicosas": faz o Python tratar as type hints como TEXTO (nao as
+# avalia na definicao). Sem isto, `def build_track(world: carla.World, ...)`
+# tentaria avaliar `carla.World` ao importar o modulo e quebraria quando o CARLA
+# nao estiver instalado (ver o import protegido abaixo).
+from __future__ import annotations
+
 # imports
 import math
 import random
 import logging
 
-import carla
+# `carla` so e' preciso para SPAWNAR (build_track / medir_assets). A parte de
+# GEOMETRIA (montagem da pista e geracao de waypoints) e' matematica pura e roda
+# sem o CARLA instalado -> permite testar os waypoints em Python puro. Por isso o
+# import e' protegido: se o CARLA nao existir, `carla` fica None e so as funcoes
+# que o usam e' que vao falhar (as de geometria continuam funcionando).
+try:
+    import carla
+except ImportError:  # ambiente sem CARLA (ex.: rodar so o gerador de waypoints)
+    carla = None
 
 # constants
 logger = logging.getLogger(__name__)
 
-# Medidas CONGELADAS das pecas (batem com o generate_pieces.py do repo do Blender).
+# Medidas das pecas (batem com o generate_pieces.py do repo do Blender).
+# Grid de 50 cm (tile quadrado 50x50): reta = 50 cm; curva com raio = 1 tile (50 cm),
+# entao a curva encaixa no grid. Largura util 50 cm (carro transita e DESVIA na reta E curva).
 COMPRIMENTO_RETA = 0.50
-RAIO_CURVA = 0.65
-LARGURA_PISTA = 0.65     # largura util (chao preto entre as bordas)
+RAIO_CURVA = 0.50
+LARGURA_PISTA = 0.50     # largura util (chao preto entre as bordas)
 
 # Conectores de cada peca, em coordenadas LOCAIS (identicos ao montar_pista.py):
 #   p_in/p_out = posicao (x, y) da entrada/saida; h_in/h_out = direcao de marcha (rad).
@@ -83,6 +99,138 @@ def _preset(nome: str) -> list[str]:
     if nome == "calibrar":   # trecho curto p/ calibrar eixo
         return ["tcc_reta", "tcc_reta", "tcc_curva90", "tcc_reta"]
     raise ValueError(f"preset de pista desconhecido: '{nome}'")
+
+
+# =============================================================================
+# WAYPOINTS (linha de centro da pista) — para o "professor" do behavior cloning
+# =============================================================================
+# A pista sao PROPS num palco vazio (sem OpenDRIVE), entao o CARLA NAO tem
+# waypoints nativos dela. Nos geramos os nossos, densos, ao longo do EIXO CENTRAL.
+# Como a pista e' uma sequencia de modulos e o `_montar` ja da a pose global de
+# cada peca, basta amostrar o centro de cada modulo e transformar para o global.
+
+def _norm_ang(a: float) -> float:
+    """Normaliza um angulo para o intervalo (-pi, pi]. Evita 'saltos' de 2*pi ao
+    comparar/derivar headings (ex.: pi/2 - (-3*pi/2) deveria ser 2*pi, i.e. 0)."""
+    return math.atan2(math.sin(a), math.cos(a))
+
+
+def _amostrar_peca_local(c: dict, espacamento: float) -> list:
+    """Amostra o EIXO CENTRAL de UMA peca em coordenadas LOCAIS.
+
+    Recebe os conectores da peca (p_in/p_out/h_in/h_out) e devolve uma lista de
+    (lx, ly, heading_local) ao longo do centro, com passo ~= `espacamento`.
+
+    Como decide a forma SO pelos conectores (nada chumbado):
+      - RETA  : h_in == h_out  -> segmento de reta de p_in ate p_out.
+      - CURVA : h_in != h_out  -> arco de circulo. O angulo varrido pela marcha
+        (dh = h_out - h_in) e' o MESMO angulo central do arco. Com a corda
+        (distancia p_in->p_out) e dh, o raio sai de R = corda / (2*sin(dh/2)).
+        O centro do arco fica a R, perpendicular ao heading de entrada (para a
+        esquerda se dh>0, direita se dh<0). Isso funciona para curva a esquerda
+        OU a direita (peca espelhada), sem hipotese sobre onde e' o centro.
+
+    heading_local = direcao de MARCHA naquele ponto (tangente ao caminho)."""
+    pin_x, pin_y = c["p_in"]
+    pout_x, pout_y = c["p_out"]
+    h_in, h_out = c["h_in"], c["h_out"]
+    dh = _norm_ang(h_out - h_in)          # angulo total girado pela peca
+
+    pts = []
+    if abs(dh) < 1e-9:
+        # ---- RETA: interpola em linha reta de p_in a p_out ----
+        dist = math.hypot(pout_x - pin_x, pout_y - pin_y)
+        n = max(1, round(dist / espacamento))
+        for i in range(n + 1):
+            t = i / n
+            pts.append((pin_x + t * (pout_x - pin_x),
+                        pin_y + t * (pout_y - pin_y),
+                        h_in))
+        return pts
+
+    # ---- CURVA: arco de circulo ----
+    corda = math.hypot(pout_x - pin_x, pout_y - pin_y)
+    raio = corda / (2.0 * math.sin(abs(dh) / 2.0))
+    giro = 1.0 if dh > 0 else -1.0        # +1 = esquerda (anti-horario), -1 = direita
+    # Centro: a partir de p_in, ande `raio` na perpendicular ao heading de entrada.
+    # normal a esquerda de um heading h e' (-sin h, cos h); a direita e' o oposto.
+    cx = pin_x + giro * (-math.sin(h_in)) * raio
+    cy = pin_y + giro * (math.cos(h_in)) * raio
+    ang0 = math.atan2(pin_y - cy, pin_x - cx)   # angulo do ponto de entrada no circulo
+    arco = raio * abs(dh)                        # comprimento do arco
+    n = max(1, round(arco / espacamento))
+    for i in range(n + 1):
+        ang = ang0 + dh * (i / n)                # varre de ang0 por dh (com sinal)
+        lx = cx + raio * math.cos(ang)
+        ly = cy + raio * math.sin(ang)
+        # tangente: perpendicular ao raio, no sentido da marcha (esq: +90, dir: -90)
+        heading = ang + giro * (math.pi / 2.0)
+        pts.append((lx, ly, _norm_ang(heading)))
+    return pts
+
+
+def gerar_waypoints(sequencia, fator: float = 1.0, espacamento: float = 0.10) -> list:
+    """Gera a LINHA DE CENTRO (waypoints densos) de uma pista.
+
+    Args:
+        sequencia: lista de nomes de peca (ex.: ["tcc_reta", "tcc_curva90", ...])
+                   OU o nome de um preset ("oval", "quadrado", "octogono", ...).
+        fator:     escala da geometria — 1.0 (1/12, pecas tcc_*) ou 12.0 (real).
+                   Precisa bater com a `escala` usada para montar a pista.
+        espacamento: passo aproximado entre waypoints, na MESMA unidade da geometria
+                   (metros ja escalados por `fator`).
+
+    Returns:
+        Lista de dicts {"x", "y", "heading" (rad), "s" (dist acumulada)}, no MESMO
+        frame "matematico" em que as pecas sao montadas (ANTES de aplicar o
+        flip_y/flip_yaw do CARLA — use `waypoints_para_carla` para converter).
+
+    Os waypoints seguem a ordem da sequencia; para pistas fechadas o ultimo ponto
+    coincide (aprox.) com o primeiro."""
+    conectores = _conectores(fator)
+    if isinstance(sequencia, str):
+        sequencia = _preset(sequencia)
+    poses, _final, _wps_entrada = _montar(sequencia, conectores)
+
+    pontos = []   # (x, y, heading) globais, ainda sem 's'
+    for (nome, tx, ty, alpha) in poses:
+        ca, sa = math.cos(alpha), math.sin(alpha)
+        locais = _amostrar_peca_local(conectores[nome], espacamento)
+        for j, (lx, ly, h_local) in enumerate(locais):
+            # Emenda: o 1o ponto de cada peca (menos a 1a) repete o ultimo da
+            # anterior -> pula, para nao duplicar waypoints coincidentes.
+            if pontos and j == 0:
+                continue
+            gx = tx + ca * lx - sa * ly          # rotaciona por alpha e translada
+            gy = ty + sa * lx + ca * ly
+            pontos.append((gx, gy, _norm_ang(h_local + alpha)))
+
+    # Acumula a distancia percorrida (s) ao longo da linha.
+    waypoints = []
+    s = 0.0
+    for i, (x, y, h) in enumerate(pontos):
+        if i > 0:
+            s += math.hypot(x - pontos[i - 1][0], y - pontos[i - 1][1])
+        waypoints.append({"x": x, "y": y, "heading": h, "s": s})
+    return waypoints
+
+
+def waypoints_para_carla(waypoints: list, flip_y: float = -1.0,
+                         flip_yaw: float = -1.0, z: float = 0.05) -> list:
+    """Converte os waypoints do frame 'matematico' para o frame do CARLA.
+
+    Aplica EXATAMENTE a mesma calibracao de eixo que o `build_track` usa ao
+    posicionar as pecas (flip_y no Y, flip_yaw no yaw) — assim os waypoints caem
+    sobre a pista de verdade. Devolve `carla.Transform` prontos para o professor
+    (pure-pursuit) mirar. Requer o CARLA instalado."""
+    if carla is None:
+        raise RuntimeError("carla nao disponivel: waypoints_para_carla precisa do CARLA")
+    transforms = []
+    for w in waypoints:
+        loc = carla.Location(x=w["x"], y=flip_y * w["y"], z=z)
+        rot = carla.Rotation(yaw=flip_yaw * math.degrees(w["heading"]))
+        transforms.append(carla.Transform(loc, rot))
+    return transforms
 
 
 def build_track(world: carla.World, track_config: dict, actor_list: list) -> list:
