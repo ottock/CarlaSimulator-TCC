@@ -43,9 +43,12 @@ def launch_carla_server(carla_config: dict) -> subprocess.Popen | None:
         return None
 
     port = carla_config.get("port", 2000)
-    cmd = [str(exe_path), f"-carla-port={port}", "-quality-level=Epic", "-nosound"]
+    # Qualidade grafica: "Low" sobe MUITO mais rapido e renderiza leve (evita o timeout
+    # de tick do servidor); "Epic" e' bonito mas pesado. Configuravel via JSON.
+    quality = carla_config.get("quality_level", "Low")
+    cmd = [str(exe_path), f"-carla-port={port}", f"-quality-level={quality}", "-nosound"]
 
-    logger.info(f"Starting CARLA server from {exe_path} on port {port}")
+    logger.info(f"Starting CARLA server from {exe_path} on port {port} (quality={quality})")
     try:
         process = subprocess.Popen(cmd, cwd=str(carla_root))
         return process

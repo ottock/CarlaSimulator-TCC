@@ -5,7 +5,8 @@
         "timeout": 20.0,
         "max_retries": 3,
         "retry_delay": 2,
-        "server_boot_time": 60
+        "server_boot_time": 60,
+        "quality_level": "Low"
     },
 
     "world": {
