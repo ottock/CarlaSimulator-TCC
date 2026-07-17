@@ -90,6 +90,16 @@ def main(settings_path: str) -> None:
             if track_cfg.get("enabled"):
                 from core.carlaClient.track_builder import build_track
                 build_track(world, track_cfg, actor_list)
+
+                # --- Modo PROFESSOR (behavior cloning) ---
+                # Se track.professor.enabled: spawna o ego, dirige seguindo os
+                # waypoints da linha de centro e grava o dataset (imagem+lidar+comando).
+                if track_cfg.get("professor", {}).get("enabled"):
+                    from core.carlaClient.professor import run_professor
+                    logger.info("Pista montada. Iniciando o PROFESSOR (coleta de dados).")
+                    run_professor(world, track_cfg, actor_list)
+                    return
+
                 logger.info("Pista custom montada. Modo visualizacao (Ctrl+C para sair).")
                 run_simulation(world)
                 return
