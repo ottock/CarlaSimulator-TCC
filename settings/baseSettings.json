@@ -24,6 +24,17 @@
                 "range": 100,
                 "upper_fov": 15,
                 "lower_fov": -25
+            },
+            "camera": {
+                "width": 640,
+                "height": 360,
+                "fov": 62.2,
+                "x": 1.5,
+                "y": 0.0,
+                "z": 1.4,
+                "pitch": -5.0,
+                "yaw": 0.0,
+                "roll": 0.0
             }
         },
 

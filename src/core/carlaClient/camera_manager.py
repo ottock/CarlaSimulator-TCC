@@ -21,8 +21,7 @@ class CameraRGBSensor:
         world: carla.World,
         actor_list: list,
         on_data_callback: Optional[Callable] = None,
-        width: int = 800,
-        height: int = 600,
+        camera_config: Optional[dict] = None,
     ):
         """Initialize RGB camera sensor.
 
@@ -31,30 +30,43 @@ class CameraRGBSensor:
             world: CARLA world.
             actor_list: List to track sensor actors.
             on_data_callback: Optional callback function for image data.
-            width: Image width.
-            height: Image height.
+            camera_config: Optional camera configuration dict. Recognized keys
+                (all optional): width, height, fov, and mounting pose
+                x/y/z/pitch/yaw/roll. Defaults match the real IMX219 camera
+                (640x360, 62.2 deg FOV) so sim frames resemble the car's.
         """
+        if camera_config is None:
+            camera_config = {}
+
         self.vehicle = vehicle
         self.world = world
         self.actor_list = actor_list
         self.on_data_callback = on_data_callback
-        self.width = width
-        self.height = height
+        self.width = int(camera_config.get("width", 640))
+        self.height = int(camera_config.get("height", 360))
         self.latest_frame = None
+
+        fov = camera_config.get("fov", 62.2)
+        loc_x = camera_config.get("x", 1.5)
+        loc_y = camera_config.get("y", 0.0)
+        loc_z = camera_config.get("z", 1.4)
+        rot_pitch = camera_config.get("pitch", -5.0)
+        rot_yaw = camera_config.get("yaw", 0.0)
+        rot_roll = camera_config.get("roll", 0.0)
 
         # Create camera blueprint
         blueprint_library = world.get_blueprint_library()
         camera_bp = blueprint_library.find("sensor.camera.rgb")
 
         # Configure camera
-        camera_bp.set_attribute("image_size_x", str(width))
-        camera_bp.set_attribute("image_size_y", str(height))
-        camera_bp.set_attribute("fov", "90")
+        camera_bp.set_attribute("image_size_x", str(self.width))
+        camera_bp.set_attribute("image_size_y", str(self.height))
+        camera_bp.set_attribute("fov", str(fov))
 
         # Spawn sensor – forward-facing camera at windshield level (real-car mounting)
         sensor_transform = carla.Transform(
-            carla.Location(x=1.5, y=0.0, z=1.4),
-            carla.Rotation(pitch=-5, yaw=0, roll=0)
+            carla.Location(x=loc_x, y=loc_y, z=loc_z),
+            carla.Rotation(pitch=rot_pitch, yaw=rot_yaw, roll=rot_roll)
         )
 
         self.sensor = world.spawn_actor(camera_bp, sensor_transform, attach_to=vehicle)

@@ -230,6 +230,7 @@ def spawn_actor_vehicle(
     actor_list: list,
     actor_config: Optional[dict] = None,
     traffic_manager: Optional[object] = None,
+    ignore_traffic_lights: bool = False,
 ) -> tuple[carla.Vehicle, dict]:
     """Spawn the main actor vehicle with sensors.
 
@@ -269,10 +270,17 @@ def spawn_actor_vehicle(
         vehicle = world.spawn_actor(vehicle_bp, spawn_point)
         actor_list.append(vehicle)
 
+        # Keep the ego's lights off for cleaner, consistent camera data.
+        try:
+            vehicle.set_light_state(carla.VehicleLightState.NONE)
+        except Exception as e:
+            logger.debug(f"Could not set vehicle light state: {e}")
+
         # Setup sensors
         use_lidar = actor_config.get("use_lidar", True)
         use_camera = actor_config.get("use_camera", True)
         lidar_config = actor_config.get("lidar", {})
+        camera_config = actor_config.get("camera", {})
 
         sensors = setup_sensors(
             vehicle,
@@ -281,12 +289,24 @@ def spawn_actor_vehicle(
             use_lidar=use_lidar,
             use_camera=use_camera,
             lidar_config=lidar_config,
+            camera_config=camera_config,
         )
 
         # Enable autopilot for actor vehicle (if traffic manager provided)
         if traffic_manager is not None:
             try:
                 vehicle.set_autopilot(True, traffic_manager.get_port())
+                # Stop the Traffic Manager from auto-toggling the ego's lights.
+                try:
+                    traffic_manager.update_vehicle_lights(vehicle, False)
+                except Exception:
+                    pass
+                # For data collection on the trackless 1:12 twin, the ego must not
+                # stop at traffic lights / stop signs (there are none on the real
+                # track) - make the Traffic Manager ignore them for the ego only.
+                if ignore_traffic_lights:
+                    traffic_manager.ignore_lights_percentage(vehicle, 100.0)
+                    traffic_manager.ignore_signs_percentage(vehicle, 100.0)
                 logger.info(f"Actor vehicle autopilot enabled")
             except Exception as e:
                 logger.warning(f"Could not enable autopilot for actor vehicle: {e}")

@@ -21,6 +21,7 @@ def setup_sensors(
     lidar_callback: Optional[Callable] = None,
     camera_callback: Optional[Callable] = None,
     lidar_config: Optional[dict] = None,
+    camera_config: Optional[dict] = None,
 ) -> dict:
     """Setup sensors for a vehicle.
 
@@ -33,6 +34,7 @@ def setup_sensors(
         lidar_callback: Optional LIDAR callback.
         camera_callback: Optional camera callback.
         lidar_config: Optional LIDAR configuration dict.
+        camera_config: Optional camera configuration dict.
 
     Returns:
         Dictionary with sensor objects.
@@ -48,7 +50,8 @@ def setup_sensors(
 
         if use_camera:
             sensors["camera"] = CameraRGBSensor(
-                vehicle, world, actor_list, on_data_callback=camera_callback
+                vehicle, world, actor_list, on_data_callback=camera_callback,
+                camera_config=camera_config,
             )
 
         logger.info(f"Sensors setup complete: {list(sensors.keys())}")
