@@ -286,7 +286,11 @@ def run_professor(world, track_cfg, actor_list):
     if max_laps <= 0 and max_steps <= 0:
         logger.info("Professor: rodando INDEFINIDAMENTE (laps=0, max_steps=0) — Ctrl+C p/ parar.")
     log_every = max(1, int(prof.get("log_every", 1)))
-    spectator = world.get_spectator()
+    # Camera de perseguicao (spectator atras do ego). Se `follow_camera` for false,
+    # o professor NAO mexe no spectator -> a camera fica LIVRE (o usuario navega com
+    # mouse/WASD na janela do CARLA enquanto o carro corre). Default: true (segue).
+    follow_camera = bool(prof.get("follow_camera", True))
+    spectator = world.get_spectator() if follow_camera else None
 
     try:
         step = 0
@@ -303,12 +307,13 @@ def run_professor(world, track_cfg, actor_list):
             if logger_ds and (step % log_every == 0):
                 logger_ds.log(cam, lid, (steer, throttle, brake), speed, tf)
 
-            # camera de perseguicao (spectator atras do ego)
-            fwd = tf.get_forward_vector()
-            spectator.set_transform(carla.Transform(
-                carla.Location(tf.location.x - fwd.x * 8, tf.location.y - fwd.y * 8,
-                               tf.location.z + 4),
-                carla.Rotation(pitch=-15, yaw=tf.rotation.yaw)))
+            # camera de perseguicao (spectator atras do ego) — so se follow_camera
+            if spectator is not None:
+                fwd = tf.get_forward_vector()
+                spectator.set_transform(carla.Transform(
+                    carla.Location(tf.location.x - fwd.x * 8, tf.location.y - fwd.y * 8,
+                                   tf.location.z + 4),
+                    carla.Rotation(pitch=-15, yaw=tf.rotation.yaw)))
 
             step += 1
             # limites ATIVOS so quando > 0 (0 = infinito)
