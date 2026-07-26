@@ -14,7 +14,7 @@
 
         "track": {
             "enabled": true,
-            "preset": "oval",
+            "preset": "pista1",
             "escala": "real",
             "flip_y": -1,
             "flip_yaw": -1,
@@ -27,10 +27,11 @@
             },
             "professor": {
                 "enabled": true,
+                "follow_camera": false,
                 "vehicle_filter": "vehicle.tesla.model3",
                 "laps": 0,
                 "max_steps": 0,
-                "target_speed": 5.0,
+                "target_speed": 2.0,
                 "lookahead": 4.0,
                 "k_throttle": 0.5,
                 "max_steer_deg": 70.0,

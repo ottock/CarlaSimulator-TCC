@@ -23,27 +23,47 @@ except ImportError:  # ambiente sem CARLA (ex.: rodar so o gerador de waypoints)
 logger = logging.getLogger(__name__)
 
 # Medidas das pecas (batem com o generate_pieces.py do repo do Blender).
-# Grid de 50 cm (tile quadrado 50x50): reta = 50 cm; curva com raio = 1 tile (50 cm),
-# entao a curva encaixa no grid. Largura util 50 cm (carro transita e DESVIA na reta E curva).
-COMPRIMENTO_RETA = 0.50
-RAIO_CURVA = 0.50
-LARGURA_PISTA = 0.50     # largura util (chao preto entre as bordas)
+# Revisao jul/2026 (pistas do estande): a pista e' feita de 3 pecas, com medidas de
+# FAIXA UTIL (onde o carro passa, SEM a parede). Duas retas (branca 31,5 / cinza 21,5)
+# + curva 90 = 1/4 de DISCO 53x53 (raio externo 53, interno 0 -> eixo central 26,5 cm).
+COMPRIMENTO_RETA_BRANCA = 0.315   # reta longa
+COMPRIMENTO_RETA_CINZA = 0.215    # reta curta
+LARGURA_PISTA = 0.53              # faixa util (onde o carro passa)
+RAIO_CURVA = LARGURA_PISTA / 2.0  # 0,265 m — eixo central da curva (1/4 de disco)
 
-# Conectores de cada peca, em coordenadas LOCAIS (identicos ao montar_pista.py):
+# Conectores de cada peca, em coordenadas LOCAIS.
 #   p_in/p_out = posicao (x, y) da entrada/saida; h_in/h_out = direcao de marcha (rad).
 # `fator` escala as POSICOES (nao os angulos) p/ casar com o tamanho das pecas:
 #   1.0 = conjunto 1/12 (tcc_*);  12.0 = conjunto real (tcc_*_real).
+#
+# Curva a ESQUERDA x DIREITA com a MESMA peca (1/4 de disco): a peca ocupa o
+# quadrante +X+Y, com bordas radiais em +X (angulo 0) e +Y (angulo 90). Entrar pela
+# borda +X e sair pela +Y vira a ESQUERDA (+90). Percorrer o MESMO disco ao contrario
+# (entrar pela +Y, sair pela +X) vira a DIREITA (-90) — sem espelhar a malha. Por isso
+# ha dois conectores ("tcc_curva90" e "tcc_curva90_r") que apontam para o MESMO prop.
 def _conectores(fator=1.0):
-    L = COMPRIMENTO_RETA * fator
+    Lb = COMPRIMENTO_RETA_BRANCA * fator
+    Lc = COMPRIMENTO_RETA_CINZA * fator
     R = RAIO_CURVA * fator
     return {
-        "tcc_reta": {
-            "p_in": (-L / 2.0, 0.0), "h_in": 0.0,
-            "p_out": (+L / 2.0, 0.0), "h_out": 0.0,
+        "tcc_reta_branca": {
+            "p_in": (-Lb / 2.0, 0.0), "h_in": 0.0,
+            "p_out": (+Lb / 2.0, 0.0), "h_out": 0.0,
         },
+        "tcc_reta_cinza": {
+            "p_in": (-Lc / 2.0, 0.0), "h_in": 0.0,
+            "p_out": (+Lc / 2.0, 0.0), "h_out": 0.0,
+        },
+        # Curva 90 a ESQUERDA (+90): entra pela borda +X (heading +Y), sai pela +Y (heading -X).
         "tcc_curva90": {
             "p_in": (R, 0.0), "h_in": math.pi / 2.0,
             "p_out": (0.0, R), "h_out": math.pi,
+        },
+        # Curva 90 a DIREITA (-90): mesmo disco percorrido ao contrario — entra pela
+        # borda +Y (heading +X), sai pela +X (heading -Y).
+        "tcc_curva90_r": {
+            "p_in": (0.0, R), "h_in": 0.0,
+            "p_out": (R, 0.0), "h_out": -math.pi / 2.0,
         },
         "tcc_curva45": {
             "p_in": (R, 0.0), "h_in": math.pi / 2.0,
@@ -53,6 +73,14 @@ def _conectores(fator=1.0):
     }
 
 
+# Nome logico da peca -> nome do PROP no CARLA (sem o sufixo de escala).
+# A curva a direita usa a MESMA malha da esquerda (so muda o conector/pose).
+def _prop_base(nome: str) -> str:
+    if nome == "tcc_curva90_r":
+        return "tcc_curva90"
+    return nome
+
+
 # functions
 def _rot2d(ang: float, x: float, y: float) -> tuple[float, float]:
     """Rotaciona o ponto (x, y) por `ang` radianos (rotacao 2D padrao)."""
@@ -60,11 +88,18 @@ def _rot2d(ang: float, x: float, y: float) -> tuple[float, float]:
     return (ca * x - sa * y, sa * x + ca * y)
 
 
-def _montar(sequencia, conectores):
+def _montar(sequencia, conectores, fechar_gap=False):
     """Logica de "tartaruga": encaixa a ENTRADA de cada peca na SAIDA da anterior.
 
     Args:
-        sequencia: lista de nomes de peca (ex.: ["tcc_reta", "tcc_curva90", ...]).
+        sequencia: lista de nomes de peca (ex.: ["tcc_reta_branca", "tcc_curva90", ...]).
+        fechar_gap: se True e a pista e' um laco QUASE fechado (residuo < 15 cm),
+            distribui o residuo de fechamento por todas as emendas (poucos mm em
+            cada uma). Por que existe: os layouts do grupo sao desenhos em grade
+            esquematica — com os comprimentos reais (31,5/21,5/26,5) alguns lacos
+            nao fecham EXATO por aritmetica. Na pista fisica isso e' absorvido por
+            folguinhas nas emendas; aqui fazemos o mesmo, em vez de deixar uma
+            unica emenda com o erro inteiro.
 
     Returns:
         (poses, pose_final) onde poses e uma lista de (nome, x, y, alpha_rad) para
@@ -85,20 +120,80 @@ def _montar(sequencia, conectores):
         h = h + (c["h_out"] - c["h_in"])          # novo heading = saida girada
         dox, doy = _rot2d(alpha, pout_x - pin_x, pout_y - pin_y)
         px, py = px + dox, py + doy               # avanca para a saida
+    # Distribui o residuo de fechamento (se pedido e se for pequeno): a peca i
+    # desliza -erro*(i/N); cada emenda fica com erro/N (~mm). Pecas e waypoints
+    # sao corrigidos juntos para continuarem casando.
+    if fechar_gap and 1e-9 < math.hypot(px, py) < 0.15:
+        ex, ey, n = px, py, len(sequencia)
+        poses = [(nome, x - ex * i / n, y - ey * i / n, a)
+                 for i, (nome, x, y, a) in enumerate(poses)]
+        waypoints = [(x - ex * i / n, y - ey * i / n, hh)
+                     for i, (x, y, hh) in enumerate(waypoints)]
+        px, py = ex / n, ey / n                   # residuo que sobra na ultima emenda
     return poses, (px, py, h), waypoints
 
 
-# Presets FECHADOS (giram sempre para a esquerda; total = 360 -> fecham o loop).
+# Presets FECHADOS. Convencao: "tcc_curva90" vira +90 (esquerda), "tcc_curva90_r"
+# vira -90 (direita). Para um laco simples fechar, o giro liquido = +/-360.
 def _preset(nome: str) -> list[str]:
     if nome == "oval":       # estadio: reta*3 + 180(2x90) + reta*3 + 180
-        return (["tcc_reta"] * 3 + ["tcc_curva90"] * 2) * 2
-    if nome == "quadrado":   # 4 cantos de 90
-        return (["tcc_reta"] * 2 + ["tcc_curva90"]) * 4
+        return (["tcc_reta_branca"] * 3 + ["tcc_curva90"] * 2) * 2
+    if nome == "quadrado":   # 4 cantos de 90 a esquerda
+        return (["tcc_reta_branca"] * 2 + ["tcc_curva90"]) * 4
+    if nome == "quadrado_dir":  # 4 cantos de 90 a DIREITA (testa a curva espelhada)
+        return (["tcc_reta_branca"] * 2 + ["tcc_curva90_r"]) * 4
     if nome == "octogono":   # 8 cantos de 45
-        return (["tcc_reta"] * 1 + ["tcc_curva45"]) * 8
+        return (["tcc_reta_branca"] * 1 + ["tcc_curva45"]) * 8
     if nome == "calibrar":   # trecho curto p/ calibrar eixo
-        return ["tcc_reta", "tcc_reta", "tcc_curva90", "tcc_reta"]
+        return ["tcc_reta_branca", "tcc_reta_branca", "tcc_curva90", "tcc_reta_branca"]
+    # --- Pistas do estande (SchemaPista1/2/3) — transcricao peca a peca ---
+    # Preenchidas apos conferir a sequencia fechada de cada uma com o grupo.
+    if nome in ("pista1", "pista2", "pista3"):
+        seq = _PISTAS_ESTANDE.get(nome)
+        if not seq:
+            raise NotImplementedError(
+                f"'{nome}': sequencia ainda nao transcrita (falta a leitura fechada do esquema)")
+        return seq
     raise ValueError(f"preset de pista desconhecido: '{nome}'")
+
+
+# Sequencias das pistas do estande (SchemaPista*.png). Vao sendo preenchidas conforme
+# a transcricao peca a peca for confirmada e o laco fechar (gap ~ 0). Pecas:
+#   tcc_reta_branca (31,5) | tcc_reta_cinza (21,5) | tcc_curva90 (esq) | tcc_curva90_r (dir)
+_B, _C = "tcc_reta_branca", "tcc_reta_cinza"
+_L, _R = "tcc_curva90", "tcc_curva90_r"
+# Um "mergulho" (lomba p/ baixo do fundo da pista 3): desce (L), nivela (R),
+# sobe (R), nivela (L) — 4 curvas de 90, sem retas. Os picos entre mergulhos
+# ENCOSTAM na faixa do topo (topo do disco = borda inferior da faixa, folga 0).
+_MERGULHO_P3 = [_L, _R, _R, _L]
+
+_PISTAS_ESTANDE = {
+    # Pista 1 (SchemaPista1): anel com topo de 7B+1C, laterais curtas (curva+B+curva;
+    # a direita tem uma B extra antes do mergulho) e MERGULHO central no fundo
+    # (desce 2 curvas, 3B no fundo, sobe 2 curvas). O laco nao fecha exato por
+    # aritmetica dos comprimentos (residuo ~10 cm) -> `fechar_gap` distribui
+    # ~4,5 mm por emenda, como a montagem fisica faz.
+    "pista1": ([_B] * 7 + [_C]              # topo (esq -> dir)
+               + [_R, _B, _R]               # lateral direita desce
+               + [_B]                       # branca extra (lado direito)
+               + [_L, _R]                   # desce ao mergulho
+               + [_B, _B, _B]               # fundo do mergulho
+               + [_R, _L]                   # sobe do mergulho
+               + [_R, _B, _R]),             # lateral esquerda sobe e fecha
+    # Pista 2 (SchemaPista2): anel com CHICANE central em "∩" (sobe, atravessa,
+    # desce; o topo da chicane ENCOSTA na faixa de cima). Fecha EXATA (gap 0).
+    "pista2": ([_C, _C] + [_B] * 6          # topo (cinzas a esquerda)
+               + [_R, _B, _B, _C, _R]       # lateral direita desce (cinza embaixo)
+               + [_B, _B]                   # fundo, a direita da chicane
+               + [_R, _B, _L, _B, _L, _B, _R]   # chicane (sobe, topo, desce)
+               + [_B]                       # fundo, a esquerda da chicane
+               + [_R, _C, _B, _B, _R]),     # lateral esquerda sobe e fecha
+    # Pista 3 (SchemaPista3, CONFIRMADA 2026-07-22): topo 4 brancas + 4 cinzas,
+    # caps de 180 nas pontas (2 curvas), fundo com 2 mergulhos cujos picos
+    # ENCOSTAM na faixa do topo. Fecha exata: gap=0.
+    "pista3": ([_B] * 4 + [_C] * 4 + [_R, _R]
+               + _MERGULHO_P3 + _MERGULHO_P3 + [_R, _R]),
+}
 
 
 # =============================================================================
@@ -190,7 +285,7 @@ def gerar_waypoints(sequencia, fator: float = 1.0, espacamento: float = 0.10) ->
     conectores = _conectores(fator)
     if isinstance(sequencia, str):
         sequencia = _preset(sequencia)
-    poses, _final, _wps_entrada = _montar(sequencia, conectores)
+    poses, _final, _wps_entrada = _montar(sequencia, conectores, fechar_gap=True)
 
     pontos = []   # (x, y, heading) globais, ainda sem 's'
     for (nome, tx, ty, alpha) in poses:
@@ -264,7 +359,7 @@ def build_track(world: carla.World, track_config: dict, actor_list: list) -> lis
 
     conectores = _conectores(fator)
     sequencia = _preset(preset)
-    poses, (fx, fy, fh), waypoints = _montar(sequencia, conectores)
+    poses, (fx, fy, fh), waypoints = _montar(sequencia, conectores, fechar_gap=True)
 
     gap = math.hypot(fx, fy)
     ang = math.degrees(fh) % 360.0
@@ -275,7 +370,7 @@ def build_track(world: carla.World, track_config: dict, actor_list: list) -> lis
     props = []
     xs, ys = [], []
     for i, (nome, tx, ty, alpha) in enumerate(poses):
-        bp = bl.find("static.prop." + nome + sufixo)
+        bp = bl.find("static.prop." + _prop_base(nome) + sufixo)
         # spawn num ponto de staging alto e teleporta (set_transform nao checa colisao de
         # emenda); como cada peca e movida ANTES da proxima, o ponto fica livre a cada vez.
         ator = world.try_spawn_actor(bp, carla.Transform(carla.Location(0.0, 0.0, 100.0)))
@@ -308,7 +403,7 @@ def build_track(world: carla.World, track_config: dict, actor_list: list) -> lis
         lat = random.uniform(-lim, lim)
         ox = wpx + lat * (-math.sin(wph))     # desloca perpendicular ao rumo da pista
         oy = wpy + lat * (math.cos(wph))
-        bp = bl.find("static.prop." + nome + sufixo)
+        bp = bl.find("static.prop." + _prop_base(nome) + sufixo)
         ator = world.try_spawn_actor(bp, carla.Transform(carla.Location(0.0, 0.0, 100.0)))
         if ator is None:
             logger.warning("Track: falhou spawn de obstaculo %s" % (nome + sufixo))
