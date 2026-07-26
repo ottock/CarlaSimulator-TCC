@@ -88,14 +88,18 @@ def _rot2d(ang: float, x: float, y: float) -> tuple[float, float]:
     return (ca * x - sa * y, sa * x + ca * y)
 
 
-def _montar(sequencia, conectores, fechar_gap=False):
+def _montar(sequencia, conectores, fechar_gap=False, fator=1.0):
     """Logica de "tartaruga": encaixa a ENTRADA de cada peca na SAIDA da anterior.
 
     Args:
         sequencia: lista de nomes de peca (ex.: ["tcc_reta_branca", "tcc_curva90", ...]).
-        fechar_gap: se True e a pista e' um laco QUASE fechado (residuo < 15 cm),
-            distribui o residuo de fechamento por todas as emendas (poucos mm em
-            cada uma). Por que existe: os layouts do grupo sao desenhos em grade
+        fechar_gap: se True e a pista e' um laco QUASE fechado, distribui o residuo
+            de fechamento por todas as emendas (poucos mm em cada uma).
+        fator: escala da geometria (1.0 = 1/12, 12.0 = real). O limiar de "residuo
+            pequeno" escala junto (0.15 * fator) — senao, em escala real um residuo
+            proporcionalmente identico ao de 1/12 (ex.: pista1 ~0,1 m -> 1,2 m)
+            passaria do limiar fixo e NAO seria distribuido, deixando um salto grande
+            numa unica emenda. Por que existe: os layouts do grupo sao desenhos em grade
             esquematica — com os comprimentos reais (31,5/21,5/26,5) alguns lacos
             nao fecham EXATO por aritmetica. Na pista fisica isso e' absorvido por
             folguinhas nas emendas; aqui fazemos o mesmo, em vez de deixar uma
@@ -123,7 +127,7 @@ def _montar(sequencia, conectores, fechar_gap=False):
     # Distribui o residuo de fechamento (se pedido e se for pequeno): a peca i
     # desliza -erro*(i/N); cada emenda fica com erro/N (~mm). Pecas e waypoints
     # sao corrigidos juntos para continuarem casando.
-    if fechar_gap and 1e-9 < math.hypot(px, py) < 0.15:
+    if fechar_gap and 1e-9 < math.hypot(px, py) < 0.15 * fator:
         ex, ey, n = px, py, len(sequencia)
         poses = [(nome, x - ex * i / n, y - ey * i / n, a)
                  for i, (nome, x, y, a) in enumerate(poses)]
@@ -285,7 +289,7 @@ def gerar_waypoints(sequencia, fator: float = 1.0, espacamento: float = 0.10) ->
     conectores = _conectores(fator)
     if isinstance(sequencia, str):
         sequencia = _preset(sequencia)
-    poses, _final, _wps_entrada = _montar(sequencia, conectores, fechar_gap=True)
+    poses, _final, _wps_entrada = _montar(sequencia, conectores, fechar_gap=True, fator=fator)
 
     pontos = []   # (x, y, heading) globais, ainda sem 's'
     for (nome, tx, ty, alpha) in poses:
@@ -359,7 +363,7 @@ def build_track(world: carla.World, track_config: dict, actor_list: list) -> lis
 
     conectores = _conectores(fator)
     sequencia = _preset(preset)
-    poses, (fx, fy, fh), waypoints = _montar(sequencia, conectores, fechar_gap=True)
+    poses, (fx, fy, fh), waypoints = _montar(sequencia, conectores, fechar_gap=True, fator=fator)
 
     gap = math.hypot(fx, fy)
     ang = math.degrees(fh) % 360.0
