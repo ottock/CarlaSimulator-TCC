@@ -231,6 +231,7 @@ def spawn_actor_vehicle(
     actor_config: Optional[dict] = None,
     traffic_manager: Optional[object] = None,
     ignore_traffic_lights: bool = False,
+    spawn_transform: Optional[object] = None,
 ) -> tuple[carla.Vehicle, dict]:
     """Spawn the main actor vehicle with sensors.
 
@@ -239,6 +240,9 @@ def spawn_actor_vehicle(
         actor_list: List to track spawned actors.
         actor_config: Actor configuration from settings.json.
         traffic_manager: Traffic manager for autopilot.
+        spawn_transform: Optional explicit ``carla.Transform`` to spawn at (e.g. the
+            first centerline waypoint on the custom track, which has no native spawn
+            points). When None, uses the map's spawn point at ``spawn_index``.
 
     Returns:
         Tuple of (vehicle, sensors_dict).
@@ -259,12 +263,15 @@ def spawn_actor_vehicle(
 
         vehicle_bp = vehicle_bps[0]
 
-        # Get spawn point
-        spawn_points = world.get_map().get_spawn_points()
-        spawn_index = actor_config.get("spawn_index", 0)
-        spawn_point = spawn_points[spawn_index % len(spawn_points)]
-
-        logger.info(f"Spawning actor vehicle: {vehicle_bp.id} at spawn point {spawn_index}")
+        # Get spawn point: explicit transform (custom track) or a map spawn point.
+        if spawn_transform is not None:
+            spawn_point = spawn_transform
+            logger.info(f"Spawning actor vehicle: {vehicle_bp.id} at custom transform")
+        else:
+            spawn_points = world.get_map().get_spawn_points()
+            spawn_index = actor_config.get("spawn_index", 0)
+            spawn_point = spawn_points[spawn_index % len(spawn_points)]
+            logger.info(f"Spawning actor vehicle: {vehicle_bp.id} at spawn point {spawn_index}")
 
         # Spawn vehicle
         vehicle = world.spawn_actor(vehicle_bp, spawn_point)
