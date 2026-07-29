@@ -33,8 +33,13 @@ Estágio A = Towns (validou a pipeline, Fases 0–3) → **Estágio B = pista cu
   recoletado. Detalhe na §5.2 do `ESTADO_IA.md`.
 - **CARLA:** roda normal. Lição: **manter o CARLA fora do OneDrive**; ele pode sumir de novo.
 
-**Próximo passo:** o **controle só-câmera** (§4) — o experimento que falta pra fechar o
-argumento do LiDAR no texto do TCC.
+**FASE 4 FECHADA** (decisão do Rafael, 2026-07-28). Validada, commitada e documentada.
+**Próximo:** a **Fase 5 — refino final do modelo** (*touch-ups*), lista completa na §7 do
+`ESTADO_IA.md`. O modelo atual já está bom; a Fase 5 é para deixá-lo redondo.
+
+**O modelo continua dual (câmera+LiDAR)** — o LiDAR fica, é o sensor do carro real. O
+"controle só-câmera" da lista é uma rede **descartável de comparação**, não uma troca do
+modelo entregue (ver §4 abaixo).
 
 ---
 
@@ -75,10 +80,17 @@ recuperação só em movimento (30% noise-active). **A integração funciona pon
 
 ---
 
-## 4. Próximo passo: o controle SÓ-CÂMERA (fecha o argumento do LiDAR)
+## 4. Fase 4 fechada — o que fica para a Fase 5
 
-Critério de aprovação da Fase 4 **foi atingido**: 3/3 pistas sem sair da pista e sem colisão,
+Critério de aprovação da Fase 4 **foi atingido**: 3/3 pistas sem sair da pista e sem colisão
+(confirmado em corridas de 120 s **e** de 300 s por pista — 420 s acumulados, dev 0.40–0.60 m),
 e a ablação separou (3/3 vs 0/3).
+
+A lista de *touch-ups* da **Fase 5** está na **§7 do `ESTADO_IA.md`**: wiggle do steering,
+a pista3 (medidamente a pior: dev 0.58–0.60 m vs 0.40–0.42 m), partidas fora do waypoint 0,
+obstáculos `tcc_*`, freio inerte (dataset tem 0% de frenagem) e velocidade (o expert roda a
+`target_speed=2.0` m/s e o modelo acompanha — subir exige recoletar). Abaixo, o item que é
+**evidência para o texto**, não melhoria de modelo:
 
 **O que falta para a escrita do TCC.** `--ablate-lidar` alimenta a rede com "tudo livre" — uma
 entrada que ela nunca viu no treino. Isso prova que **este modelo dual depende do LiDAR**, mas

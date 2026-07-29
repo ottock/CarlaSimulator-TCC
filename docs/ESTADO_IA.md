@@ -35,7 +35,8 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 | **2** | Modelo só-câmera (direção) em malha fechada | ✅ Dirige (ressalva: cruzamentos) |
 | **3** | Dual-input (câmera+LiDAR, acelera/freia) | ✅ **Dirige e freia**; ablação do LiDAR inconclusiva no Town (§5.7) |
 | **4** | Pista custom (gêmeo digital) | ✅ **3/3 pistas limpas**; ablação **decisiva** — o LiDAR provou valor (§5.7) |
-| 5–6 | Hardware (Jetson / pista real) | ⬜ Deferido |
+| 5 | **Refino final do modelo (touch-ups)** | ⬜ **Próxima** — o modelo atual já está bom; lista na §7 |
+| 6–7 | Hardware (Jetson / pista real) | ⬜ Deferido |
 
 **Marco da Fase 2 (`cam_v2.pt`):** modelo só-câmera dirige **~171 s** centrado a
 ~0.08 m no Town01. Open-loop `val_MAE 0.044`, `var_ratio 1.00`.
@@ -377,14 +378,41 @@ No fim do closed-loop o harness imprime, por rota:
   (`track_ref`), expert Pure Pursuit, `driving_track_v1.pt` dirige as 3 pistas do
   estande em malha fechada (**3/3 limpas**) e a **ablação do LiDAR separou** (§5.7.1).
 
-1. **Controle só-câmera (fecha o argumento do LiDAR):** treinar uma rede **só-câmera**
-   no `dataset_track_v1` e rodar o mesmo `eval_track`. É o controle que falta para
-   afirmar "o LiDAR é necessário na pista" em vez de apenas "este modelo dual depende
-   dele" (ressalva metodológica na §5.7.1). É o experimento de maior valor para o texto.
-2. **Obstáculos `tcc_*` (a previsão original da §5.7):** `eval_track --obstacles N`
-   já espalha cones/muretas. Como o Pure Pursuit não desvia deles, o dataset não tem
-   exemplo de desvio — serve como teste de **frenagem/robustez**, não de contorno.
-3. **Hardware (deferido):** Jetson Nano, ONNX→TensorRT, atuação (o hardware atual da
+### Fase 5 — refino final do modelo (*touch-ups*)
+
+**Premissa: o `driving_track_v1` já está bom** (3/3 pistas limpas em 420 s acumulados
+por pista). Esta fase é para deixá-lo redondo, **não** para reescrevê-lo. **O modelo
+continua dual (câmera+LiDAR)** — decisão do Rafael, e o LiDAR é o sensor do carro real.
+
+1. **Controle só-câmera — evidência, não melhoria.** Treinar uma rede **só-câmera** no
+   `dataset_track_v1` e rodar o mesmo `eval_track`. É uma rede **descartável, de
+   comparação**: o modelo entregue continua sendo o dual. Serve para poder afirmar "o
+   LiDAR é **necessário** nesta pista" em vez de só "este modelo dual depende dele"
+   (ressalva da §5.7.1) — é a resposta para a banca perguntar "por que LiDAR se a câmera
+   já dirige?". **Requer um ajuste:** o `eval_track.py` instancia `DrivingPolicy` fixo,
+   precisaria aceitar `ModelSteeringPolicy` (throttle fixo) para um checkpoint só-câmera.
+2. **Wiggle do steering em reta** (memória `steering-wiggle-from-recovery`): vem do
+   volume de dado de recuperação. Candidatos: aumentar `--recovery-every`, pesar menos
+   os frames de recuperação no sampler, ou penalizar *jerk* de steering no loss.
+3. **A pista3 é medidamente a pior:** desvio médio **0.58–0.60 m** e p95 **1.52–1.58 m**,
+   contra 0.40–0.42 m e p95 ~1.08 m nas pistas 1 e 2 (consistente nas corridas de 120 s
+   e 300 s, então é sistemático, não ruído). Investigar se é geometria (curva mais
+   fechada) ou falta de dado — e, se for dado, coletar mais episódios só nela.
+4. **Velocidade é escolha, não defeito:** o expert roda a `target_speed=2.0` m/s
+   (`settings/pistaTCC.json`) e o modelo **acompanha** (1.7–2.1 m/s). Para volta mais
+   rápida, subir o `target_speed` e **recoletar** — o modelo imita a velocidade do expert.
+5. **Robustez de partida:** hoje o ego sempre spawna no **waypoint 0**. Testar partidas
+   de vários pontos da centerline mede generalização de verdade.
+6. **Obstáculos `tcc_*`** (a previsão original da §5.7): `eval_track --obstacles N` já
+   espalha cones/muretas. **Ressalva:** o Pure Pursuit não desvia deles, então o dataset
+   não tem exemplo de contorno — serve como teste de **robustez/frenagem**, não de desvio.
+7. **Freio inerte:** o `dataset_track_v1` tem **0% de frenagem**, então o head de brake
+   está praticamente morto (MAE 0.006 porque o alvo é sempre ~0). Para controle
+   longitudinal real na pista seria preciso dado de frenagem — expert que freie, ou
+   obstáculos que forcem parada.
+
+### Depois
+8. **Hardware (deferido):** Jetson Nano, ONNX→TensorRT, atuação (o hardware atual da
    equipe usa **PCA9685 I2C**, não GPIO 33/32), pista real, medição do gap sim-to-real.
 
 ---
