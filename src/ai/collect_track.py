@@ -33,6 +33,7 @@ import carla
 import numpy as np
 
 from ai.dataset_writer import EpisodeWriter, write_meta, LABEL_COLUMNS
+from ai.recovery_schedule import RecoveryScheduler
 from ai.report import dataset_report, print_report
 from ai.sim_lidar import points_to_sectors_m
 from ai.track_ref import track_centerline, track_width, deviation_from_centerline
@@ -117,8 +118,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         with simulation_context(client, wc) as (world, _actor_list):
             fixed = world.get_settings().fixed_delta_seconds or 0.05
             steps_per_ep = int(seconds / fixed)
-            rec_interval = max(1, int(recovery_every / fixed))
-            rec_window = int(1.5 / fixed)
+            sched = RecoveryScheduler(interval_steps=max(1, int(recovery_every / fixed)),
+                                      window_steps=int(1.5 / fixed), enabled=recovery)
             rng = random.Random(seed)
             fator = 12.0 if str(track_cfg0.get("escala", "meio")).lower() == "real" else 1.0
             z_spawn = float(track_cfg0.get("z", 0.05)) * fator + 0.3
@@ -150,18 +151,18 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     k_throttle=float(prof.get("k_throttle", 0.5)),
                     max_steer_deg=float(prof.get("max_steer_deg", 70.0)))
 
-                last_teleport = -10 ** 9
                 for _ep in range(episodes_por_pista):
                     writer = EpisodeWriter(_episode_dir(out_dir, global_ep))
                     global_ep += 1
                     kept = dropped = recovered = 0
+                    sched.reset()   # o `step` recomeca em 0: o relogio tem que recomecar junto
                     try:
                         for step in range(steps_per_ep):
                             moving = _speed_ms(ego) >= recovery_min_speed
-                            if recovery and moving and (step - last_teleport) >= rec_interval:
+                            if sched.should_teleport(step, moving):
                                 _teleport_offcenter_track(ego, centerline, rng,
                                                           recovery_lat, recovery_yaw, z_spawn)
-                                last_teleport = step
+                                sched.mark(step)
 
                             tf = ego.get_transform()
                             speed = _speed_ms(ego)
@@ -173,7 +174,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
 
                             obs = read_observation(ego, sensors)
                             dev, _ = deviation_from_centerline(centerline, tf.location.x, tf.location.y)
-                            recovering = recovery and (step - last_teleport) < rec_window
+                            recovering = sched.is_recovering(step)
                             if obs["image"] is not None and dev <= lim_fora:
                                 lidar_m = points_to_sectors_m(
                                     _lidar_points(obs), n_sectors=LIDAR_N_SECTORS,
