@@ -34,8 +34,16 @@ Estágio A = Towns (validou a pipeline, Fases 0–3) → **Estágio B = pista cu
 - **CARLA:** roda normal. Lição: **manter o CARLA fora do OneDrive**; ele pode sumir de novo.
 
 **FASE 4 FECHADA** (decisão do Rafael, 2026-07-28). Validada, commitada e documentada.
-**Próximo:** a **Fase 5 — refino final do modelo** (*touch-ups*), lista completa na §7 do
-`ESTADO_IA.md`. O modelo atual já está bom; a Fase 5 é para deixá-lo redondo.
+
+**Próximo: FASE 6 — Jetson Nano.** O Rafael **adiou a Fase 5** (touch-ups): o modelo atual
+já serve para testar no carrinho. A lista da Fase 5 fica registrada na §7 do `ESTADO_IA.md`,
+**na ordem recomendada**, para retomar depois.
+
+⚠️ **Antes de escrever código do Jetson, leia os bloqueadores da Fase 6 (§7 do
+`ESTADO_IA.md`).** Dois podem matar a fase: (1) o sim roda em **escala 12×**, então a
+leitura do LiDAR real precisa ser multiplicada por 12 — cru, o modelo cai na condição da
+ablação, que bate em 3/3 pistas; (2) é preciso confirmar **se o carrinho tem LiDAR**, já
+que o modelo entregue é dual.
 
 **O modelo continua dual (câmera+LiDAR)** — o LiDAR fica, é o sensor do carro real. O
 "controle só-câmera" da lista é uma rede **descartável de comparação**, não uma troca do

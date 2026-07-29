@@ -35,8 +35,9 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 | **2** | Modelo só-câmera (direção) em malha fechada | ✅ Dirige (ressalva: cruzamentos) |
 | **3** | Dual-input (câmera+LiDAR, acelera/freia) | ✅ **Dirige e freia**; ablação do LiDAR inconclusiva no Town (§5.7) |
 | **4** | Pista custom (gêmeo digital) | ✅ **3/3 pistas limpas**; ablação **decisiva** — o LiDAR provou valor (§5.7) |
-| 5 | **Refino final do modelo (touch-ups)** | ⬜ **Próxima** — o modelo atual já está bom; lista na §7 |
-| 6–7 | Hardware (Jetson / pista real) | ⬜ Deferido |
+| 5 | Refino final do modelo (touch-ups) | ⏸️ **ADIADA** (decisão do Rafael) — o modelo atual já serve para o carrinho |
+| **6** | **Jetson Nano (ONNX→TensorRT + carro real)** | ⬜ **PRÓXIMA** — §7 |
+| 7 | Pista física / gap sim-to-real | ⬜ Deferido |
 
 **Marco da Fase 2 (`cam_v2.pt`):** modelo só-câmera dirige **~171 s** centrado a
 ~0.08 m no Town01. Open-loop `val_MAE 0.044`, `var_ratio 1.00`.
@@ -378,7 +379,26 @@ No fim do closed-loop o harness imprime, por rota:
   (`track_ref`), expert Pure Pursuit, `driving_track_v1.pt` dirige as 3 pistas do
   estande em malha fechada (**3/3 limpas**) e a **ablação do LiDAR separou** (§5.7.1).
 
-### Fase 5 — refino final do modelo (*touch-ups*)
+### Fase 5 — refino final do modelo (*touch-ups*) — ⏸️ ADIADA
+
+> **DECISÃO (Rafael, 2026-07-28): esta fase foi ADIADA.** O modelo atual já é bom o
+> suficiente para testar no carrinho; a prioridade passou a ser o **Jetson (Fase 6)**.
+> A lista abaixo fica registrada, **na ordem recomendada**, para quando for retomada.
+
+**Ordem recomendada — medir antes de ajustar.** Os itens 5 e 6 são só *medição*: não
+mexem no modelo e dizem quais dos outros de fato valem esforço. Fazer o barato primeiro
+evita afinar às cegas algo que talvez nem seja o problema:
+1. **Obstáculos (item 6)** — o único que roda **sem tocar em código** (`--obstacles N`
+   já existe). Espera-se que bata: o modelo nunca viu obstáculo no treino. Isso não é
+   regressão, é a medida de quanto o `tcc_*` está fora da distribuição, e é o que
+   justifica (ou dispensa) o item 7. É também a previsão original da §5.7, nunca testada.
+2. **Partidas fora do waypoint 0 (item 5)** — mudança pequena (`--start-idx`), e é o
+   resultado mais fácil de contestar hoje: "3/3 limpas" é sempre do mesmo ponto de
+   partida. Transforma o teste em generalização de verdade.
+3. **pista3 (item 3)** — com os números acima na mão, dá para saber se ela é pior em
+   todas as condições ou só na geometria dela.
+4. **Wiggle (item 2) e freio (item 7)** — por último: exigem recoletar ou mexer no loss.
+   Não vale pagar esse custo antes de saber se algo mais básico falha.
 
 **Premissa: o `driving_track_v1` já está bom** (3/3 pistas limpas em 420 s acumulados
 por pista). Esta fase é para deixá-lo redondo, **não** para reescrevê-lo. **O modelo
@@ -411,9 +431,50 @@ continua dual (câmera+LiDAR)** — decisão do Rafael, e o LiDAR é o sensor do
    longitudinal real na pista seria preciso dado de frenagem — expert que freie, ou
    obstáculos que forcem parada.
 
-### Depois
-8. **Hardware (deferido):** Jetson Nano, ONNX→TensorRT, atuação (o hardware atual da
-   equipe usa **PCA9685 I2C**, não GPIO 33/32), pista real, medição do gap sim-to-real.
+### Fase 6 — Jetson Nano: colocar o modelo no carrinho (A PRÓXIMA)
+
+**Objetivo:** rodar o `driving_track_v1.pt` no **Jetson Nano** dirigindo o RC 1:12
+(PCA9685 I2C, **não** GPIO 33/32). Hoje **não existe nenhum código de export** no repo —
+esta fase é campo aberto.
+
+**O que já está pronto de propósito para isso:**
+- `shared/image_pipeline.py` e `shared/lidar_pipeline.py` são mantidos **compatíveis com
+  Python 3.6** justamente para rodar no Jetson. São a **fonte única** sim↔carro: o mesmo
+  `preprocess()` e o mesmo `normalize_sectors_m()` do treino. **Reusar, nunca reescrever** —
+  qualquer divergência aqui vira erro silencioso de inferência.
+- O `DrivingNet` é pequeno (~0.5 M params) e foi desenhado exportável.
+- A câmera do sim já usa **FOV 62.2** = IMX219 real.
+
+**Bloqueadores a resolver ANTES de escrever código (os dois primeiros podem matar a fase):**
+
+1. 🔴 **ESCALA 12× — o mais perigoso.** O gêmeo digital roda com `escala: "real"` e
+   `fator = 12.0`: a pista no sim tem **6.36 m** de largura para representar os **0.53 m**
+   reais, e o ego é um Tesla Model 3 no papel do 1:12. **Tudo que o LiDAR mede no sim é
+   12× o mundo real.** O modelo aprendeu "parede a ~1–3 m"; o LiDAR do carrinho vai ler
+   ~0.08–0.26 m. Se alimentar cru, **tudo cai abaixo do piso de 0.5 m e/ou vira `livre`** —
+   que é **exatamente a condição da ablação**, a que bate em 3/3 pistas. **Conserto:
+   multiplicar a leitura real por 12 antes de normalizar** (ou re-treinar em escala real).
+   Vale o mesmo para a velocidade: 2 m/s no sim ≈ 0.17 m/s reais.
+2. 🔴 **O carrinho tem LiDAR? Qual?** O modelo **exige** 72 setores em metros. O
+   `shared/lidar_pipeline.scan_to_sectors_m` já é o ponto de entrada para converter um scan
+   real. **Se não houver LiDAR físico, o modelo dual não roda** — e aí o "controle
+   só-câmera" da Fase 5 deixa de ser experimento e vira **caminho obrigatório**.
+3. 🟡 **O design doc pedia 8 setores; implementamos 72.** Decidir se reconcilia (o número
+   de setores é entrada da rede: mudar exige re-treinar).
+4. 🟡 **Rede de segurança "<3 m → freia" do design doc nunca foi implementada.** Em escala
+   real seriam ~0.25 m. Como o head de freio está inerte (dataset 0% de frenagem), essa
+   trava **em código** (fora da rede) é provavelmente a forma mais segura de ter freio.
+5. 🟡 **Montagem da câmera:** conferir altura/pitch reais contra os do `baseSettings.json` —
+   o crop 130/30 do `preprocess()` assume o enquadramento do sim.
+
+**Ordem sugerida:**
+1. `src/ai/export_onnx.py` — duas entradas: imagem `(1,3,66,200)` e lidar `(1,72)`. Validar
+   **paridade PyTorch↔ONNX** no split de validação (diferença deve ser ~1e-5, não "parece
+   igual"). É teste barato que pega 90% dos erros de export.
+2. TensorRT **no próprio Jetson** (`trtexec`, FP16) — o engine é específico da máquina.
+3. Runtime no carro: câmera + LiDAR → `shared/*` → engine → PCA9685. Medir **FPS real**
+   (o sim roda a 20 Hz; se o Jetson não alcançar, o comportamento muda).
+4. Só então: pista física e medição do gap sim-to-real (Fase 7).
 
 ---
 
