@@ -20,15 +20,21 @@ Estágio A = Towns (validou a pipeline, Fases 0–3) → **Estágio B = pista cu
 ## 2. ONDE ESTAMOS AGORA (resumo de 30s)
 
 - **Fases 0–3: FEITAS (na `main`).** Modelo dual-input `driving_v3.pt` dirige e freia nos Towns.
-  Ablação do LiDAR foi **inconclusiva nos Towns** (câmera basta pra carro grande) — a **teoria §5.7**
-  diz que o LiDAR prova valor na pista custom (paredes = corredor; obstáculos pequenos). Ver `ESTADO_IA.md`.
-- **Fase 4: a ponte está CONSTRUÍDA, COMMITADA e VALIDADA por smoke no CARLA.** Falta só rodar a
-  **coleta completa → treino → loop fechado + ablação**.
-- **CARLA:** estava quebrado (o motor `CarlaUE4-Win64-Shipping.exe` tinha sumido do disco — repo no
-  OneDrive + extração de um pacote do colega). **JÁ FOI RESTAURADO** e roda. Lição: **manter o CARLA
-  fora do OneDrive**; ele pode sumir de novo.
+  Ablação do LiDAR foi **inconclusiva nos Towns** (câmera basta pra carro grande).
+- **Fase 4: FEITA e VALIDADA.** Coleta → treino → loop fechado → ablação, tudo rodado:
+  - `dataset_track_v1`: **14.400 frames** nas 3 pistas, 30% recuperação, 20.3% reto.
+  - `driving_track_v1.pt`: open-loop `MAE s/t/b = 0.039/0.017/0.006`, `var_ratio 1.01`.
+  - Malha fechada (120 s/pista): **3/3 pistas limpas**, `offlane=0`, `collisions=0`.
+  - **Ablação do LiDAR: 3/3 limpas COM vs 0/3 SEM.** A §5.7 finalmente separou — e o valor
+    veio da **parede/corredor** (lane-keeping), não dos obstáculos pequenos previstos.
+- **Bug corrigido no caminho:** a recuperação só acontecia no 1º episódio de cada pista
+  (relógio do teleporte não reiniciava por episódio) e os outros 9 vinham **rotulados como
+  recuperação sem nenhum teleporte**. Virou `ai/recovery_schedule.py` + 5 testes; dataset
+  recoletado. Detalhe na §5.2 do `ESTADO_IA.md`.
+- **CARLA:** roda normal. Lição: **manter o CARLA fora do OneDrive**; ele pode sumir de novo.
 
-**Próximo passo:** rodar a coleta completa das 3 pistas (§6, passo 1).
+**Próximo passo:** o **controle só-câmera** (§4) — o experimento que falta pra fechar o
+argumento do LiDAR no texto do TCC.
 
 ---
 
@@ -69,10 +75,26 @@ recuperação só em movimento (30% noise-active). **A integração funciona pon
 
 ---
 
-## 4. Próximo passo: coleta → treino → loop fechado + ablação (§6 tem os comandos)
+## 4. Próximo passo: o controle SÓ-CÂMERA (fecha o argumento do LiDAR)
 
-Só falta rodar. Critério de aprovação da Fase 4: dá voltas nas 3 pistas **sem sair da pista e sem
-colisão**; e a **ablação** mostra a diferença do LiDAR (com paredes deve ajudar a centralizar).
+Critério de aprovação da Fase 4 **foi atingido**: 3/3 pistas sem sair da pista e sem colisão,
+e a ablação separou (3/3 vs 0/3).
+
+**O que falta para a escrita do TCC.** `--ablate-lidar` alimenta a rede com "tudo livre" — uma
+entrada que ela nunca viu no treino. Isso prova que **este modelo dual depende do LiDAR**, mas
+não que **uma rede só-câmera fracassaria** na pista (ela poderia aprender a se virar só com a
+imagem, como aconteceu no Town). Para poder afirmar o mais forte:
+
+```powershell
+# treinar SO-camera no mesmo dataset (train.py sem --dual) e rodar o mesmo eval_track
+.venv\Scripts\python.exe -u src\ai\train.py --data D:/tcc_data/dataset_track_v1 `
+    --out D:/tcc_data/runs/cam_track_v1.pt --init-from D:/tcc_data/runs/cam_v2.pt --epochs 40
+```
+Se a só-câmera também bater nas paredes → **o LiDAR é necessário na pista** (afirmação forte).
+Se ela dirigir limpo → a conclusão honesta é "o dual aprendeu a depender do LiDAR", mais fraca.
+**Atenção:** o `eval_track` hoje instancia `DrivingPolicy`; rodar um checkpoint só-câmera exige
+suportar `ModelSteeringPolicy` lá (throttle fixo), então é um pequeno ajuste de código, não só
+um comando.
 
 ---
 
@@ -88,13 +110,14 @@ colisão**; e a **ablação** mostra a diferença do LiDAR (com paredes deve aju
 
 ---
 
-## 6. Comandos (retomar daqui)
+## 6. Comandos (receita de reprodução — já rodados, resultados na §2)
 
 Da raiz do repo, `.venv\Scripts\python.exe`. Se o CARLA já estiver rodando, acrescente `--no-launch`.
+Tempos medidos: coleta ~3 min, treino ~13 min (RTX 3070), cada `eval_track` ~4 min.
 
 ```powershell
 # 0) sanity
-.venv\Scripts\python.exe -m pytest tests/ -q            # 92 passed
+.venv\Scripts\python.exe -m pytest tests/ -q            # 97 passed
 
 # 1) COLETA das 3 pistas (o proximo passo)  — nao e realtime, rapido
 .venv\Scripts\python.exe -u src\ai\collect_track.py --out D:/tcc_data/dataset_track_v1 ^

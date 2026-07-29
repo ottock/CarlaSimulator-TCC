@@ -34,7 +34,7 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 | **1** | Pipeline de coleta de dados | ✅ Feito e validado |
 | **2** | Modelo só-câmera (direção) em malha fechada | ✅ Dirige (ressalva: cruzamentos) |
 | **3** | Dual-input (câmera+LiDAR, acelera/freia) | ✅ **Dirige e freia**; ablação do LiDAR inconclusiva no Town (§5.7) |
-| 4 | Pista custom (gêmeo digital) | ⬜ **Próxima** — onde o LiDAR deve provar valor |
+| **4** | Pista custom (gêmeo digital) | ✅ **3/3 pistas limpas**; ablação **decisiva** — o LiDAR provou valor (§5.7) |
 | 5–6 | Hardware (Jetson / pista real) | ⬜ Deferido |
 
 **Marco da Fase 2 (`cam_v2.pt`):** modelo só-câmera dirige **~171 s** centrado a
@@ -45,6 +45,12 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 Num *tour* por 12 spawns de Town01, **10/12 dirigiram 25 s limpos** (desvio de faixa
 ~0.1 m); as únicas batidas em pista aberta foram em **cruzamento** (§5.3). No teste de
 frenagem (carro parado à frente), parou sem bater em **~75–87%** dos trials.
+
+**Marco da Fase 4 (`driving_track_v1.pt`):** modelo dual treinado nas **3 pistas do
+estande** (Pure Pursuit como expert). Open-loop `MAE_steer 0.039`, `MAE_throttle 0.017`,
+`MAE_brake 0.006`, `var_ratio 1.01`. Em malha fechada (120 s por pista): **3/3 pistas
+limpas**, `offlane=0`, `collisions=0`, desvio médio 0.41–0.58 m. **A ablação do LiDAR
+finalmente separou** (§5.7): sem LiDAR, **0/3 limpas**.
 
 **Descoberta honesta sobre o LiDAR (§5.7):** a ablação com/sem LiDAR **não** mostrou
 dependência — a **câmera sozinha basta** para frear atrás de carro grande. O valor do
@@ -89,7 +95,14 @@ repo; o `src` é injetado no `sys.path` por cada script.
   câmera PilotNet (idêntico, para *warm-start*) + braço Conv1D de LiDAR (padding
   circular) → `[steer(tanh), throttle(sigmoid), brake(sigmoid)]`. ~0.5 M params.
 - `warmstart.py` — **`load_camera_backbone`**: copia o braço de câmera (`cnn.*`) do
-  `cam_v2.pt` para o `DrivingNet` (transfere a direção provada).
+  `cam_v2.pt` para o `DrivingNet` (transfere a direção provada). Copia **só** `cnn.*`
+  mesmo quando a origem já é um `DrivingNet` (ex.: `driving_v3.pt` na Fase 4) — o braço
+  de LiDAR nasce zerado **de propósito**: herdá-lo do Town importaria o viés de
+  "ignorar o LiDAR" (§5.7) justo no experimento que mede o LiDAR.
+- `recovery_schedule.py` — **`RecoveryScheduler`** (puro, sem CARLA): quando cutucar o ego
+  e quais frames contam como recuperação. `reset()` por episódio é obrigatório (§5.2).
+- `track_ref.py` — centerline própria + desvio lateral da pista custom (a pista não tem
+  OpenDRIVE, então `map.get_waypoint()` não funciona lá).
 - `model_policy.py` — `ModelSteeringPolicy` (Fase 2, `throttle` fixo) e
   **`DrivingPolicy`** (Fase 3): câmera+LiDAR → `(steer, throttle, brake)`. Tem
   **deadzone de freio** (§5.6) e `ablate_lidar` (para a ablação; LiDAR = "livre").
@@ -110,6 +123,11 @@ repo; o `src` é injetado no `sys.path` por cada script.
   eixo, sampler curva+freio, **`--init-from cam_v2.pt`** para warm-start).
 - `eval_openloop.py` — MAE + var_ratio; auto-detecta a arquitetura do checkpoint
   (câmera → MAE de steer; `DrivingNet` → **MAE por eixo** steer/throttle/brake).
+- `collect_track.py` — **coleta na pista custom (Fase 4)**: Pure Pursuit sobre a centerline
+  do `track_ref`, gravando no nosso formato. `--pistas pista1,pista2,pista3` roda várias
+  pistas num dataset só; `--recovery` usa o `RecoveryScheduler`.
+- `eval_track.py` — **malha fechada na pista custom**: desvio medido contra a centerline
+  própria; `--ablate-lidar` para a ablação; `--obstacles N` espalha os `tcc_*`.
 - `eval_closedloop.py` — **harness de malha fechada**. Política injetável: expert,
   `--autopilot`, ou `--model CKPT` (auto-seleciona `DrivingPolicy` se o checkpoint
   for `DrivingNet`). **`--traffic N`** spawna trânsito; **`--ablate-lidar`** neutraliza
@@ -155,9 +173,14 @@ Datasets existentes:
   reto**, steer balanceado, **19.5% de frenagem**, mean speed 5.8 m/s. É o dataset da
   Fase 3 (direção + freio).
 
+- `dataset_track_v1` — **Fase 4**: 12 episódios × 1200 frames = **14.400 frames** nas 3
+  pistas do estande (4 por pista), expert **Pure Pursuit**. **20.3% reto** (pista fechada
+  é bem mais curva que o Town), **30.0% recuperação** (129 teleportes), **0% freio** — o
+  Pure Pursuit não freia, decisão de escopo da Fase 4. Mean speed 1.73 m/s.
+
 Checkpoints (`D:\tcc_data\runs\`): `cam_v1/cam_v2.pt` (Fase 2, só-câmera),
-`driving_v3.pt` (Fase 3, dual-input). `driving_v2conv.pt` = dual treinado só no `v2`
-(usado no debug da direção).
+`driving_v3.pt` (Fase 3, dual-input), **`driving_track_v1.pt` (Fase 4, as 3 pistas)**.
+`driving_v2conv.pt` = dual treinado só no `v2` (usado no debug da direção).
 
 ---
 
@@ -178,6 +201,16 @@ modelo nunca vê "estou torto". Em execução, erros se acumulam → estado nunc
 (deslocamento lateral + ângulo, via `set_transform`, só em reta) e gravamos o
 **autopilot voltando ao centro** — ensinando "torto → volta". **Efeito:** o modelo
 passou a dirigir **171 s** (≈13×) centrado a 0,08 m.
+
+**Bug achado na Fase 4 (e o motivo do `recovery_schedule.py`):** no `collect_track.py`, o
+relógio do último teleporte era zerado **uma vez por pista**, mas o `step` reinicia a cada
+episódio — então, do 2º episódio em diante, `step - last_teleport` ficava negativo o
+episódio inteiro: **zero cutucão** e, pior, **todos os frames rotulados `noise_active=True`**.
+Medido no dataset descartado: 9 dos 12 episódios com **0 teleportes** (maior salto entre
+frames = 0.09 m) mas "95% recovery" no relatório. O agendador virou
+`ai/recovery_schedule.py` (puro, com `reset()` por episódio e 5 testes). Depois do conserto:
+**todos** os episódios com 10–12 teleportes e 30.0% de recuperação. **Lição:** conferir o
+dado pelo **deslocamento entre frames**, não pela coluna `noise_active` — a coluna pode mentir.
 
 Ajustes na Fase 3: a recuperação agora só teleporta **com o carro em movimento**
 (≥2 m/s) e a cada **5 s** — antes teleportava o ego mesmo **parado freando** atrás do
@@ -225,6 +258,35 @@ frenagem** atrás de carro grande. Dois motivos:
 `tcc_mureta`, `tcc_pessoa2d` da pista custom. Um cone é minúsculo na imagem (pior de
 longe) mas dá retorno claro no LiDAR. **Conclusão: a ablação decisiva é na Fase 4**
 (pista custom), não no Town com carros grandes. O pipeline dual está pronto para isso.
+
+### 5.7.1 RESOLVIDO na Fase 4 — o LiDAR provou valor (na parede, não no cone)
+A ablação na pista custom (`driving_track_v1.pt`, 120 s por pista) **separou de forma
+limpa**:
+
+| pista | com LiDAR | LiDAR ablado |
+|---|---|---|
+| pista1 | dev 0.41 m, **0 colisões**, 1.9 m/s | dev 0.62 m, **1 colisão @ 79.3 s**, 1.7 m/s |
+| pista2 | dev 0.41 m, **0 colisões**, 1.6 m/s | dev 0.77 m, **1377 colisões @ 39.6 s**, 0.6 m/s |
+| pista3 | dev 0.58 m, **0 colisões**, 1.6 m/s | dev 0.85 m, **1721 colisões @ 24.2 s**, 0.3 m/s |
+| **resumo** | **3/3 limpas** | **0/3 limpas** |
+
+As contagens de 1377/1721 com `mean_speed` caindo a 0.3–0.6 m/s são o ego **encostado
+na parede raspando** (um evento por tick), não 1700 batidas distintas: bateu e ficou preso.
+
+**Por que aqui separou e no Town não:** o valor do LiDAR veio da **parede/corredor**, não
+dos obstáculos pequenos que a §5.7 previa. A pista 1:12 é um corredor estreito de paredes
+contínuas (~34/72 setores com retorno o tempo todo), então o LiDAR informa o *lane-keeping*
+a cada tick. No Town, o carro-alvo ficava fora do alcance de 12 m e a câmera bastava.
+
+**Ressalva metodológica (importante para a escrita do TCC):** `--ablate-lidar` alimenta a
+rede com "tudo livre", entrada que ela **nunca viu no treino** — logo o resultado prova que
+*este modelo dual depende do LiDAR*, e **não** que uma rede só-câmera treinada do zero
+fracassaria na pista. O controle honesto para a afirmação mais forte é treinar um modelo
+só-câmera nos mesmos dados e comparar (§7).
+
+**`offlane=0` nas corridas abladas não é contradição:** as paredes ficam a ~1–2 m do centro,
+dentro do limiar de saída de pista (metade da largura = 3.18 m). **Nesta pista o sinal de
+falha é `collisions`, não `offlane`.**
 
 ---
 
@@ -278,6 +340,26 @@ python scripts\braking_test.py --model D:\tcc_data\runs\driving_v3.pt --trials 8
 python scripts\braking_test.py --model D:\tcc_data\runs\driving_v3.pt --trials 8 --gap 18 --fast --ablate-lidar
 ```
 
+**Fase 4 (pista custom 1:12 — as 3 pistas do estande):**
+```powershell
+# 1) Coletar nas 3 pistas com Pure Pursuit + recuperacao  (~3 min, nao e realtime)
+.venv\Scripts\python.exe -u src\ai\collect_track.py --out D:/tcc_data/dataset_track_v1 `
+    --pistas pista1,pista2,pista3 --episodes-por-pista 4 --seconds 60 --recovery
+.venv\Scripts\python.exe src\ai\collect_track.py --report D:/tcc_data/dataset_track_v1
+
+# 2) Treinar o dual com warm-start (copia SO o braco de camera do driving_v3)  ~13 min
+.venv\Scripts\python.exe -u src\ai\train.py --dual --data D:/tcc_data/dataset_track_v1 `
+    --out D:/tcc_data/runs/driving_track_v1.pt --init-from D:/tcc_data/runs/driving_v3.pt --epochs 40
+
+# 3) Malha fechada nas 3 pistas (--realtime para assistir)
+.venv\Scripts\python.exe -u src\ai\eval_track.py --model D:/tcc_data/runs/driving_track_v1.pt `
+    --pistas pista1,pista2,pista3 --seconds 120
+
+# 4) A ablacao do LiDAR (§5.7.1): rode as DUAS e compare `collisions`
+.venv\Scripts\python.exe -u src\ai\eval_track.py --model D:/tcc_data/runs/driving_track_v1.pt --pistas pista1,pista2,pista3 --seconds 120
+.venv\Scripts\python.exe -u src\ai\eval_track.py --model D:/tcc_data/runs/driving_track_v1.pt --pistas pista1,pista2,pista3 --seconds 120 --ablate-lidar
+```
+
 No fim do closed-loop o harness imprime, por rota:
 `offlane=<saídas de faixa>  collisions=<eventos>  ... FIRST COLLISION @ <s>`.
 **Sucesso = `collisions=0`** numa corrida longa.
@@ -291,16 +373,18 @@ No fim do closed-loop o harness imprime, por rota:
 - **Fase 3: FEITA.** Modelo dual dirige e freia; ablação do LiDAR ficou para a Fase 4
   (§5.7). Pipeline dual-input completo e testado.
 
-1. **Fase 4 — pista custom (gêmeo digital), a próxima:**
-   - Corrigir o fluxo para **spawnar ego + sensores NA pista custom** (hoje o
-     `track_builder` só monta e exibe — ver o design em `docs/superpowers/specs/`).
-   - Derivar uma **centerline própria** da geometria do `track_builder` (a pista não
-     tem malha OpenDRIVE, então `map.get_waypoint()` **não** funciona lá — a métrica
-     de desvio e o teleporte de recuperação precisam vir da centerline própria).
-   - Expert **Pure Pursuit** sobre essa centerline; coletar → treinar (fine-tuning do
-     `driving_v3`) → **ablação do LiDAR nos obstáculos `tcc_*`** (onde ele deve
-     finalmente ganhar da câmera, §5.7).
-2. **Hardware (deferido):** Jetson Nano, ONNX→TensorRT, atuação (o hardware atual da
+- **Fase 4: FEITA.** Ego + sensores spawnam na pista custom, centerline própria
+  (`track_ref`), expert Pure Pursuit, `driving_track_v1.pt` dirige as 3 pistas do
+  estande em malha fechada (**3/3 limpas**) e a **ablação do LiDAR separou** (§5.7.1).
+
+1. **Controle só-câmera (fecha o argumento do LiDAR):** treinar uma rede **só-câmera**
+   no `dataset_track_v1` e rodar o mesmo `eval_track`. É o controle que falta para
+   afirmar "o LiDAR é necessário na pista" em vez de apenas "este modelo dual depende
+   dele" (ressalva metodológica na §5.7.1). É o experimento de maior valor para o texto.
+2. **Obstáculos `tcc_*` (a previsão original da §5.7):** `eval_track --obstacles N`
+   já espalha cones/muretas. Como o Pure Pursuit não desvia deles, o dataset não tem
+   exemplo de desvio — serve como teste de **frenagem/robustez**, não de contorno.
+3. **Hardware (deferido):** Jetson Nano, ONNX→TensorRT, atuação (o hardware atual da
    equipe usa **PCA9685 I2C**, não GPIO 33/32), pista real, medição do gap sim-to-real.
 
 ---
