@@ -36,7 +36,8 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 | **3** | Dual-input (câmera+LiDAR, acelera/freia) | ✅ **Dirige e freia**; ablação do LiDAR inconclusiva no Town (§5.7) |
 | **4** | Pista custom (gêmeo digital) | ✅ **3/3 pistas limpas**; ablação **decisiva** — o LiDAR provou valor (§5.7) |
 | 5 | Refino final do modelo (touch-ups) | ⏸️ **ADIADA** (decisão do Rafael) — o modelo atual já serve para o carrinho |
-| **6** | **Jetson Nano (ONNX→TensorRT + carro real)** | ⬜ **PRÓXIMA** — §7 |
+| **6a** | **Modelo 180° + export ONNX** (não precisa do carro) | ⬜ **PRÓXIMA** — design escrito, §7 |
+| 6b | Jetson: bancada + runtime (TensorRT + PCA9685) | ⬜ Depois da 6a |
 | 7 | Pista física / gap sim-to-real | ⬜ Deferido |
 
 **Marco da Fase 2 (`cam_v2.pt`):** modelo só-câmera dirige **~171 s** centrado a
@@ -54,15 +55,16 @@ estande** (Pure Pursuit como expert). Open-loop `MAE_steer 0.039`, `MAE_throttle
 limpas**, `offlane=0`, `collisions=0`, desvio médio 0.41–0.58 m. **A ablação do LiDAR
 finalmente separou** (§5.7): sem LiDAR, **0/3 limpas**.
 
-**Descoberta honesta sobre o LiDAR (§5.7):** a ablação com/sem LiDAR **não** mostrou
-dependência — a **câmera sozinha basta** para frear atrás de carro grande. O valor do
-LiDAR deve aparecer nos **obstáculos pequenos/baixos** da pista custom (Fase 4), que
-são difíceis para a câmera e fáceis para o LiDAR.
+**A história do LiDAR (§5.7 → §5.7.1):** na **Fase 3** (Towns) a ablação deu
+**inconclusiva** — a câmera sozinha bastava para frear atrás de carro grande. A previsão
+era que o LiDAR provaria valor nos **obstáculos pequenos** da pista custom. Na **Fase 4** ele
+provou — mas pela **parede/corredor** (lane-keeping), não pelos obstáculos. Previsão certa
+no destino, errada na causa.
 
 **A ressalva (Fases 2–3):** ainda erra em **cruzamentos complexos** (§5.3) — limite
 conhecido do BC mono-câmera, **inexistente na pista fechada 1:12** (Estágio B).
 
-**Qualidade:** 83 testes unitários (`pytest -q`), TDD nas partes puras.
+**Qualidade:** 97 testes unitários (`pytest -q`), TDD nas partes puras.
 
 ---
 
@@ -433,9 +435,10 @@ continua dual (câmera+LiDAR)** — decisão do Rafael, e o LiDAR é o sensor do
 
 ### Fase 6 — Jetson Nano: colocar o modelo no carrinho (A PRÓXIMA)
 
-**Objetivo:** rodar o `driving_track_v1.pt` no **Jetson Nano** dirigindo o RC 1:12
-(PCA9685 I2C, **não** GPIO 33/32). Hoje **não existe nenhum código de export** no repo —
-esta fase é campo aberto.
+**Objetivo:** rodar o modelo no **Jetson Nano** dirigindo o RC 1:12 (PCA9685 I2C, **não**
+GPIO 33/32). Dividida em **6a** (simulador + export, não precisa do carro) e **6b** (bancada +
+runtime). O código de export ainda não existe, mas a fase **não é mais campo aberto**: os
+bloqueadores foram investigados e há design escrito (ver abaixo).
 
 **O que já está pronto de propósito para isso:**
 - `shared/image_pipeline.py` e `shared/lidar_pipeline.py` são mantidos **compatíveis com
@@ -445,36 +448,56 @@ esta fase é campo aberto.
 - O `DrivingNet` é pequeno (~0.5 M params) e foi desenhado exportável.
 - A câmera do sim já usa **FOV 62.2** = IMX219 real.
 
-**Bloqueadores a resolver ANTES de escrever código (os dois primeiros podem matar a fase):**
+**Bloqueadores originais — TODOS RESOLVIDOS ou encaminhados (análise de 2026-08-19,
+cruzando `hardware/controle_teste.py` com os dados do `dataset_track_v1`):**
 
-1. 🔴 **ESCALA 12× — o mais perigoso.** O gêmeo digital roda com `escala: "real"` e
-   `fator = 12.0`: a pista no sim tem **6.36 m** de largura para representar os **0.53 m**
-   reais, e o ego é um Tesla Model 3 no papel do 1:12. **Tudo que o LiDAR mede no sim é
-   12× o mundo real.** O modelo aprendeu "parede a ~1–3 m"; o LiDAR do carrinho vai ler
-   ~0.08–0.26 m. Se alimentar cru, **tudo cai abaixo do piso de 0.5 m e/ou vira `livre`** —
-   que é **exatamente a condição da ablação**, a que bate em 3/3 pistas. **Conserto:
-   multiplicar a leitura real por 12 antes de normalizar** (ou re-treinar em escala real).
-   Vale o mesmo para a velocidade: 2 m/s no sim ≈ 0.17 m/s reais.
-2. 🔴 **O carrinho tem LiDAR? Qual?** O modelo **exige** 72 setores em metros. O
-   `shared/lidar_pipeline.scan_to_sectors_m` já é o ponto de entrada para converter um scan
-   real. **Se não houver LiDAR físico, o modelo dual não roda** — e aí o "controle
-   só-câmera" da Fase 5 deixa de ser experimento e vira **caminho obrigatório**.
-3. 🟡 **O design doc pedia 8 setores; implementamos 72.** Decidir se reconcilia (o número
-   de setores é entrada da rede: mudar exige re-treinar).
-4. 🟡 **Rede de segurança "<3 m → freia" do design doc nunca foi implementada.** Em escala
-   real seriam ~0.25 m. Como o head de freio está inerte (dataset 0% de frenagem), essa
-   trava **em código** (fora da rede) é provavelmente a forma mais segura de ter freio.
-5. 🟡 **Montagem da câmera:** conferir altura/pitch reais contra os do `baseSettings.json` —
-   o crop 130/30 do `preprocess()` assume o enquadramento do sim.
+1. ✅ **ESCALA 12× — resolvido sem gambiarra.** Como a normalização divide por `max_range`,
+   usar **`max_range = 12.0/12 = 1.0 m` no carro** é *matematicamente idêntico* a multiplicar
+   as leituras por 12 — e não exige tocar no `shared/`. Parede real a 0.265 m → 0.265
+   normalizado, igual ao treino. (Velocidade segue valendo: 2 m/s sim = **0.167 m/s real**.)
+2. ✅ **O carrinho TEM LiDAR: o COIN-D6 (WitMotion), 2D 360°.** E o `CoinD6Parser` do
+   `hardware/controle_teste.py` já devolve `(angle_deg, dist_m)` — **exatamente** a assinatura
+   de `scan_to_sectors_m`. O gap 3D×2D **não é fatal**: `points_to_sectors_m` já achata a nuvem
+   (mínimo por setor), e para parede vertical a distância horizontal independe da elevação do
+   feixe. O modelo nunca viu 3D — viu 72 números.
+3. 🔴 **NOVO e o mais importante: oclusão pela própria carroceria.** Para ver a parede (baixa),
+   o sensor precisa ficar baixo; nessa altura o carro bloqueia a traseira. Mascarar a traseira
+   **só na inferência** muda 25% dos valores (erro médio **0.177** na escala 0–1) = a condição
+   da ablação. **Conserto: retreinar com FOV limitado** — ver Fase 6a abaixo. Montar o LiDAR no
+   **para-choque dianteiro** (no centro a carroceria bloqueia nos dois sentidos do eixo).
+4. ✅ **8 vs 72 setores:** ficam **72**. O `scan_to_sectors_m` é parametrizado; o HUD do
+   hardware usa 8 só para exibição.
+5. ✅ **Freio:** o controle longitudinal aprendido está **fora de escopo** (dataset com 0% de
+   frenagem — nem o throttle do modelo pararia o carro). Velocidade fixa + parada de emergência
+   **em código**. Medido: trava no cone frontal ±10° a **0.25 m real → 0 falsos positivos em
+   14.400 frames** (o pior 0.1% da condução normal fica a 0.287 m).
+6. 🟡 **Montagem da câmera:** segue valendo conferir altura/pitch reais contra o
+   `baseSettings.json` — o crop 130/30 do `preprocess()` assume o enquadramento do sim.
 
-**Ordem sugerida:**
-1. `src/ai/export_onnx.py` — duas entradas: imagem `(1,3,66,200)` e lidar `(1,72)`. Validar
-   **paridade PyTorch↔ONNX** no split de validação (diferença deve ser ~1e-5, não "parece
-   igual"). É teste barato que pega 90% dos erros de export.
-2. TensorRT **no próprio Jetson** (`trtexec`, FP16) — o engine é específico da máquina.
-3. Runtime no carro: câmera + LiDAR → `shared/*` → engine → PCA9685. Medir **FPS real**
-   (o sim roda a 20 Hz; se o Jetson não alcançar, o comportamento muda).
-4. Só então: pista física e medição do gap sim-to-real (Fase 7).
+**ONNX validado (2026-08-19) — o Jetson consegue rodar:**
+export em **opset 11** OK (1.9 MB), `onnx.checker` OK, **paridade PyTorch↔ONNX 5.96e-08**.
+O padding circular do braço de LiDAR **não** virou `Pad(wrap)` exótico: o exportador decompõe em
+`Slice`+`Concat`. Ops geradas — `Conv, Elu, Gemm, Flatten, Unsqueeze, Slice, Concat, Constant,
+Tanh, Sigmoid` — são todas nativas do TensorRT. O TensorRT 8.x do JetPack 4.6 cobre até opset
+13–14, então opset 11 passa com folga (`trtexec --onnx=… --fp16`, rodado **no próprio Jetson**).
+
+#### Fase 6a — modelo 180° + export ONNX (A PRÓXIMA, não precisa do carro)
+
+**Spec:** `docs/superpowers/specs/2026-08-19-ai-fase6a-fov180-onnx-design.md`.
+Máscara de FOV parametrizada (`fov_deg`, default 180°) em `shared/lidar_pipeline.py`, usada
+**identicamente** no sim e no carro; **72 setores mantidos** (o padding circular só é honesto com
+o vetor de 360°); **`fov_deg` gravado no checkpoint** para não haver descasamento silencioso;
+retreino a partir do `dataset_track_v1` **sem recoletar** (~20 min de GPU); validação com
+`eval_track` (**critério: seguir 3/3 limpas**); e `export_onnx.py` com paridade obrigatória.
+
+#### Fase 6b — carro (depois)
+
+Medições de bancada **antes** do runtime: (1) arco real de oclusão → vira o `fov_deg` do retreino;
+(2) zero e sentido do ângulo do COIN-D6; (3) velocidade real a 1600 µs; (4) altura da parede e do
+cone × plano do LiDAR. Depois: runtime câmera + LiDAR → `shared/*` → engine TensorRT → PCA9685
+(servo ch15 `1500 + steer*200` µs; ESC ch12 em PWM fixo), reusando `watchdog`/`ESC_ARMADO` do
+`hardware/controle_teste.py`. Medir **FPS real** (o sim roda a 20 Hz).
+Só então: pista física e medição do gap sim-to-real (Fase 7).
 
 ---
 
