@@ -19,7 +19,7 @@ def steer_to_us(steer):
 
     CARLA's convention (+1 = right) matches the car's (1700 us = right).
     Anything unusable -- ``None``, NaN, a non-number -- returns centre, which is
-    the safe command.
+    the safe command. Infinity is clamped to the nearest extreme.
     """
     try:
         s = float(steer)
@@ -27,6 +27,9 @@ def steer_to_us(steer):
         return STEER_CENTER_US
     if s != s:  # NaN
         return STEER_CENTER_US
+    # Clamp s to [-1, 1] before rounding to handle infinity safely while
+    # preserving intent: +inf means "hard right", -inf means "hard left".
+    s = max(-1.0, min(1.0, s))
     us = int(round(STEER_CENTER_US + s * STEER_SPAN_US))
     return max(STEER_LEFT_US, min(STEER_RIGHT_US, us))
 

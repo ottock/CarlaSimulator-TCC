@@ -4,9 +4,6 @@ O modelo devolve steer em [-1, 1]; o servo fala microssegundos. Este mapa e o
 ultimo ponto antes do hardware, entao ele tem de ser seguro mesmo recebendo lixo:
 um NaN ou um valor fora de faixa NAO pode virar um comando extremo no servo.
 """
-import math
-
-import pytest
 
 from ai.car.control_map import (
     ESC_NEUTRAL_US,
@@ -48,6 +45,16 @@ def test_nan_is_centre():
 
 def test_none_is_centre():
     assert steer_to_us(None) == STEER_CENTER_US
+
+
+def test_positive_infinity_is_hard_right():
+    # Infinity should not crash; +inf clamped to 1.0 means hard right.
+    assert steer_to_us(float("inf")) == STEER_RIGHT_US
+
+
+def test_negative_infinity_is_hard_left():
+    # Infinity should not crash; -inf clamped to -1.0 means hard left.
+    assert steer_to_us(float("-inf")) == STEER_LEFT_US
 
 
 def test_esc_neutral_constant():
