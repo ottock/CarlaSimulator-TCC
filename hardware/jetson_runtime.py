@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Roda o modelo treinado no carro (Fase 6b, primeiro teste com rodas no ar).
+"""Roda o modelo treinado no carro (Fase 6b).
 
-Camera CSI + LiDAR COIN-D6 -> engine TensorRT -> servo. O ESC fica TRAVADO EM
-NEUTRO: nesta fase o carro nao anda.
+Camera CSI + LiDAR COIN-D6 -> engine TensorRT -> servo, mais o ESC a uma
+velocidade CONSTANTE (sem aceleracao). O modelo comanda apenas o ESTERCO: as
+cabecas de throttle/brake sao ignoradas de proposito, porque a de freio esta
+inerte (o dataset de treino tem 0% de frenagem).
+
+Por padrao o carro NAO anda -- ver o bloco SEGURANCA abaixo.
 
 Ambiente: Jetson Nano / JetPack 4.6.x / Python 3.6.
 
@@ -13,11 +17,14 @@ maquina e da versao):
     /usr/src/tensorrt/bin/trtexec --onnx=driving_track_180.onnx \\
         --saveEngine=driving_track_180.engine --fp16
 
-Uso:
+Uso (rodas no ar, carro parado -- o padrao):
     python3 hardware/jetson_runtime.py \\
         --engine driving_track_180.engine \\
         --config driving_track_180.json \\
         --out runs/car_teste1 --seconds 60
+
+Para o carro ANDAR, alem de ESC_ARMADO = True neste arquivo:
+        ... --cruise-us 1620
 """
 import argparse
 import glob
