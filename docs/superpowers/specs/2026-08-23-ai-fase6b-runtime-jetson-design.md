@@ -49,6 +49,8 @@ com o **ESC travado em neutro**, gravando um log que o PC analisa depois.
 | `src/ai/car/control_map.py` | **novo** — puro: `steer` → µs, clamps, watchdog |
 | `src/ai/car/config.py` | **novo** — puro: lê o sidecar JSON do modelo |
 | `src/ai/car/image_crop.py` | **novo** — puro: recorte central para compensar a lente de 130° |
+| `src/ai/car/run_log.py` | **novo** — grava o log da corrida (nome NÃO é `logging.py`: não sombrear a stdlib) |
+| `src/ai/car/loop.py` | **novo** — `DriveLoop` com o hardware injetado; é aqui que o envelope de segurança fica testável no PC |
 | `hardware/jetson_runtime.py` | **novo** — fino: GStreamer, serial, TensorRT, PCA9685 + o laço |
 | `src/ai/export_onnx.py` | passa a escrever o sidecar `.json` |
 | `scripts/analyze_car_log.py` | **novo** — roda no PC: mede o log |
