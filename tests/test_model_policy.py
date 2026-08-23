@@ -102,3 +102,51 @@ def test_driving_policy_ablate_lidar_free_vector(tmp_path):
     vec = pol._lidar_vector(_fake_obs())
     assert vec.shape == (72,)
     assert bool(np.all(vec == 1.0))  # ablation feeds "clear road" (free), not "obstacle everywhere"
+
+
+# --- FOV limitado (Fase 6a) ---------------------------------------------------
+# O fov_deg viaja no checkpoint porque um descasamento silencioso entre a mascara
+# do treino e a da inferencia entrega a rede a mesma entrada da ablacao (0/3 pistas).
+
+
+def _save_driving_ckpt_fov(path, fov_deg):
+    net = DrivingNet(); net(torch.zeros(1, 3, 66, 200), torch.zeros(1, 72))
+    torch.save({"model_state_dict": net.state_dict(), "arch": "DrivingNet",
+                "fov_deg": fov_deg}, path)
+
+
+def _rear_obs():
+    """Um ponto na frente (5 m) e outro atras (2 m, x negativo)."""
+    return {"image": np.zeros((360, 640, 3), dtype=np.uint8),
+            "lidar": {"points": np.array([[5.0, 0.0, 0.0], [-2.0, 0.0, 0.0]], dtype=np.float32)}}
+
+
+def test_driving_policy_reads_fov_from_checkpoint(tmp_path):
+    ckpt = tmp_path / "driving180.pt"; _save_driving_ckpt_fov(ckpt, 180.0)
+    pol = DrivingPolicy(str(ckpt), device="cpu")
+    assert pol.fov_deg == 180.0
+
+
+def test_driving_policy_legacy_checkpoint_has_no_fov(tmp_path):
+    # driving_track_v1.pt (Fase 4) nao tem a chave: tem de continuar rodando 360
+    ckpt = tmp_path / "driving.pt"; _save_driving_ckpt(ckpt)
+    pol = DrivingPolicy(str(ckpt), device="cpu")
+    assert pol.fov_deg is None
+    vec = pol._lidar_vector(_rear_obs())
+    assert vec[36] < 1.0  # o ponto de tras continua visivel
+
+
+def test_driving_policy_applies_the_checkpoint_fov_to_the_lidar_vector(tmp_path):
+    ckpt = tmp_path / "driving180.pt"; _save_driving_ckpt_fov(ckpt, 180.0)
+    pol = DrivingPolicy(str(ckpt), device="cpu")
+    vec = pol._lidar_vector(_rear_obs())
+    assert np.allclose(vec[18:54], 1.0)  # traseira cega
+    assert vec[0] < 1.0                  # o ponto da frente sobrevive
+
+
+def test_driving_policy_explicit_fov_overrides_the_checkpoint(tmp_path):
+    ckpt = tmp_path / "driving180.pt"; _save_driving_ckpt_fov(ckpt, 180.0)
+    pol = DrivingPolicy(str(ckpt), device="cpu", fov_deg=360.0)
+    assert pol.fov_deg == 360.0
+    vec = pol._lidar_vector(_rear_obs())
+    assert vec[36] < 1.0  # 360 explicito desliga a mascara

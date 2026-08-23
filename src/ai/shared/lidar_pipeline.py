@@ -59,6 +59,43 @@ def scan_to_sectors(angles_deg, dist_m, n_sectors=N_SECTORS, max_range=MAX_RANGE
     return (meters / max_range).astype(np.float32)
 
 
+def apply_fov_mask(sectors_m, fov_deg=180.0, max_range=MAX_RANGE_M):
+    """Blind the sectors outside a frontal field of view, in METRES.
+
+    On the real car the chassis occludes the rear of the LiDAR, so the network
+    can only ever see a frontal arc. Masking only at inference time would hand
+    the net an input it never saw in training (25% of the vector changes, mean
+    error 0.177 -- the very condition that made the LiDAR ablation crash), so the
+    SAME mask is applied when building the training set and when driving.
+
+    Sector ``i`` spans ``[i*360/n, (i+1)*360/n)``, so its centre is
+    ``(i+0.5)*360/n``. The sector is kept when that centre, wrapped to
+    ``[-180, +180]``, satisfies ``|angle| <= fov_deg/2``; otherwise it reads
+    ``max_range``, i.e. "free / nothing there" -- the same value an unoccupied
+    sector holds, so the masked input stays inside the distribution the model
+    already knows.
+
+    Args:
+        sectors_m: per-sector minimum distances in metres (see
+            :func:`scan_to_sectors_m`).
+        fov_deg: total frontal field of view in degrees. ``>= 360`` is a no-op.
+        max_range: value written into the blinded sectors ("free").
+
+    Returns:
+        A NEW ``np.ndarray`` (the caller's array is never mutated, so the raw
+        ``lidar.npy`` stays intact), shape unchanged, dtype float32.
+    """
+    out = np.asarray(sectors_m, dtype=np.float32).copy()
+    if fov_deg >= 360.0:
+        return out
+
+    n = out.shape[-1]
+    centers = (np.arange(n, dtype=np.float64) + 0.5) * (360.0 / n)
+    centers = np.mod(centers + 180.0, 360.0) - 180.0   # -> [-180, +180)
+    out[np.abs(centers) > fov_deg / 2.0] = np.float32(max_range)
+    return out
+
+
 def normalize_sectors_m(sectors_m, max_range=MAX_RANGE_M):
     """Turn stored per-sector metres into model input in [0, 1] (near=0, free=1).
 

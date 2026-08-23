@@ -30,7 +30,7 @@ class SteeringDataset(Dataset):
         return torch.from_numpy(x), torch.from_numpy(y)
 
 
-from ai.shared.lidar_pipeline import normalize_sectors_m
+from ai.shared.lidar_pipeline import apply_fov_mask, normalize_sectors_m
 
 
 class DrivingDataset(Dataset):
@@ -38,11 +38,17 @@ class DrivingDataset(Dataset):
 
     Target = [steer, throttle, brake]. LiDAR is loaded per-episode via mmap and
     normalized with the SAME function the car will use at inference.
+
+    ``fov_deg`` (Fase 6a) blinds the sectors the real car cannot see -- its own
+    chassis occludes the rear of the LiDAR. The mask is applied on the way out,
+    so ``lidar.npy`` keeps the full 360 deg scan and the FOV can be changed
+    without recollecting. ``None`` = no mask (the Fase 4 behaviour).
     """
 
-    def __init__(self, index, max_range=12.0):
+    def __init__(self, index, max_range=12.0, fov_deg=None):
         self.index = index
         self.max_range = max_range
+        self.fov_deg = fov_deg
         self._lidar_cache = {}
 
     def __len__(self):
@@ -62,6 +68,8 @@ class DrivingDataset(Dataset):
             raise FileNotFoundError(rec["image"])
         x = preprocess(img_bgr)
         sectors_m = np.asarray(self._lidar_array(rec["lidar"])[rec["row"]], dtype=np.float32)
+        if self.fov_deg is not None:
+            sectors_m = apply_fov_mask(sectors_m, self.fov_deg, self.max_range)
         lidar = normalize_sectors_m(sectors_m, self.max_range)
         target = np.array([rec["steer"], rec["throttle"], rec["brake"]], dtype=np.float32)
         return torch.from_numpy(x), torch.from_numpy(lidar), torch.from_numpy(target)

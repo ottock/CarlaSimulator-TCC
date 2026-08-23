@@ -11,7 +11,7 @@ import torch
 from ai.model import CameraSteeringNet, DrivingNet
 from ai.shared.image_pipeline import preprocess
 from ai.sim_lidar import points_to_sectors_m
-from ai.shared.lidar_pipeline import normalize_sectors_m
+from ai.shared.lidar_pipeline import apply_fov_mask, normalize_sectors_m
 
 
 class ModelSteeringPolicy:
@@ -41,10 +41,16 @@ class DrivingPolicy:
     Consumes camera + LiDAR from ``obs`` and outputs (steer, throttle, brake).
     LiDAR points are converted with the SAME sim adapter used at collection time,
     then normalized with the SAME function used in training.
+
+    ``fov_deg`` (Fase 6a) defaults to whatever the checkpoint was TRAINED with:
+    feeding a 180-deg model a full 360-deg scan (or the reverse) puts the net
+    outside its training distribution, which is exactly what made the LiDAR
+    ablation crash on 3/3 tracks. Passing the argument explicitly overrides the
+    checkpoint (use ``360.0`` to disable the mask).
     """
 
     def __init__(self, ckpt_path, device=None, throttle_floor=0.0, brake_deadzone=0.1,
-                 n_sectors=72, max_range=12.0, ablate_lidar=False):
+                 n_sectors=72, max_range=12.0, ablate_lidar=False, fov_deg=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.throttle_floor = throttle_floor
         self.brake_deadzone = brake_deadzone
@@ -57,6 +63,8 @@ class DrivingPolicy:
         state = torch.load(ckpt_path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(state["model_state_dict"])
         self.model.eval()
+        # Checkpoints from before Fase 6a simply lack the key -> full 360 deg.
+        self.fov_deg = state.get("fov_deg") if fov_deg is None else fov_deg
 
     def _lidar_vector(self, obs):
         data = obs.get("lidar") if obs else None
@@ -70,6 +78,8 @@ class DrivingPolicy:
             return np.ones(self.n_sectors, dtype=np.float32)
         sectors_m = points_to_sectors_m(data["points"], n_sectors=self.n_sectors,
                                         max_range=self.max_range)
+        if self.fov_deg is not None:
+            sectors_m = apply_fov_mask(sectors_m, self.fov_deg, self.max_range)
         return normalize_sectors_m(sectors_m, self.max_range)
 
     def __call__(self, obs):

@@ -27,3 +27,23 @@ def test_train_dual_writes_checkpoint(tmp_path):
     state = torch.load(str(out), map_location="cpu", weights_only=False)
     assert state["arch"] == "DrivingNet"
     assert {"mae_steer", "mae_throttle", "mae_brake"} <= set(state)
+
+
+def test_train_dual_records_fov_in_the_checkpoint(tmp_path):
+    # O FOV do treino TEM de viajar no checkpoint: se a inferencia usar outro, a
+    # rede recebe uma entrada fora da distribuicao (= a condicao da ablacao).
+    _episode(tmp_path / "ep_0001", 8)
+    _episode(tmp_path / "ep_0002", 8)
+    out = tmp_path / "driving_smoke_180.pt"
+    train_dual(str(tmp_path), str(out), epochs=1, batch=4, workers=0, device="cpu", fov_deg=180.0)
+    state = torch.load(str(out), map_location="cpu", weights_only=False)
+    assert state["fov_deg"] == 180.0
+
+
+def test_train_dual_records_no_fov_when_full_360(tmp_path):
+    _episode(tmp_path / "ep_0001", 8)
+    _episode(tmp_path / "ep_0002", 8)
+    out = tmp_path / "driving_smoke_360.pt"
+    train_dual(str(tmp_path), str(out), epochs=1, batch=4, workers=0, device="cpu")
+    state = torch.load(str(out), map_location="cpu", weights_only=False)
+    assert state["fov_deg"] is None

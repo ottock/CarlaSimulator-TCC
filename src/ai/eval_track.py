@@ -90,8 +90,12 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                 policy = DrivingPolicy(model_ckpt, ablate_lidar=ablate_lidar)
                 spec = setup_spectator_follow_vehicle(world, ego, mode="behind") if follow else {}
 
-                logger.info("=== PISTA %s%s (%d passos) ===",
-                            pista, " [LiDAR ABLADO]" if ablate_lidar else "", steps)
+                # O fov_deg vem do checkpoint (Fase 6a). Logar deixa registrado na
+                # corrida com que campo de visao o modelo foi treinado -- um
+                # descasamento treino x inferencia e' silencioso e catastrofico.
+                fov_txt = "360 (sem mascara)" if policy.fov_deg is None else ("%.0f" % policy.fov_deg)
+                logger.info("=== PISTA %s%s (%d passos, LiDAR FOV %s) ===",
+                            pista, " [LiDAR ABLADO]" if ablate_lidar else "", steps, fov_txt)
                 metrics = RouteMetrics()
                 idx = 0
                 first_col = None
