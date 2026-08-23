@@ -29,7 +29,10 @@ Dados/pesos **fora do OneDrive**: `D:\tcc_data`. Treino PyTorch 2.6+cu124 (RTX 3
 - **Fase 6b (carro): É A PRÓXIMA.** Precisa do hardware. §4.
 - **125 testes verdes.**
 
-**Próximo passo:** as **medições de bancada** do §4 — antes de escrever qualquer runtime.
+**Próximo passo (DECISÃO do Rafael, 2026-08-23):** ele quer **primeiro ver o modelo rodando
+no carro**, antes de fechar as medições de bancada. O caminho seguro para isso é o
+**primeiro teste com as rodas no ar** (§4.0) — que entrega o que ele quer ver E as medições
+#1 e #2 de brinde.
 
 ---
 
@@ -71,7 +74,34 @@ O `lidar.npy` guarda sempre os 360°: **mudar o FOV é retreinar, não recoletar
 
 ## 4. Fase 6b — o carro (A PRÓXIMA)
 
-### 4.1 Medições de bancada — ANTES de escrever runtime
+### 4.0 Primeiro teste no carro — rodas no ar (o que o Rafael pediu)
+
+**Objetivo:** ver o modelo esterçando o servo de verdade, sem risco. O `controle_teste.py`
+já tem `ESC_ARMADO = False`, então o carro **não anda**; só o servo (ch15) responde.
+
+**O que falta construir:** um runtime que troque o **teclado** do `controle_teste.py` pelo
+**modelo**. Reusar de lá: `CoinD6Parser`, o setup do PCA9685, o `watchdog` e o `ESC_ARMADO`.
+Reusar de `src/ai/shared/`: `preprocess`, `scan_to_sectors_m`, `apply_fov_mask`,
+`normalize_sectors_m` — **nunca reimplementar**.
+
+Ordem:
+1. Copiar `driving_track_180.onnx` para o Jetson.
+2. `trtexec --onnx=driving_track_180.onnx --fp16` **no próprio Jetson** (engines são
+   específicas da máquina/versão).
+3. Runtime com **ESC desarmado**, lendo o `fov_deg` dos `metadata_props` do `.onnx` e
+   usando **`max_range = 1.0`** (a escala 12×).
+
+**O que observar nesse teste:**
+- o servo esterça de forma coerente com o que a câmera vê? (aponte o carro para a parede)
+- **o ângulo do LiDAR está espelhado?** Se estiver, o carro esterça para o lado errado —
+  invisível no papel, óbvio com as rodas no ar, e uma batida com elas no chão.
+- **FPS real** do Jetson. O sim roda a 20 Hz; bem menos que isso e o carro reage tarde.
+- logar o scan cru já resolve as medições **#1 (arco de oclusão)** e **#2 (zero/sentido)**.
+
+**Só depois disso** armar o ESC — e aí a medição #3 (velocidade) vira a próxima prioridade,
+pelo motivo do §4.3.
+
+### 4.1 Medições de bancada — ANTES de soltar o carro
 
 1. **Arco real de oclusão.** Carro em área aberta, logar o scan cru e ver quais ângulos
    devolvem distância curta constante (é a carroceria). **Se não for ~180°, é só retreinar**
