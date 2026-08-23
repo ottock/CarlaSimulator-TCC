@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 
 from ai.car.run_log import RunLogger
-from scripts_analyze import fps_stats, load_run, occlusion_arc, sector_to_deg
+from scripts_analyze import (blocked_runs, fps_stats, load_run, occlusion_arc,
+                             sector_to_deg)
 
 
 def test_occlusion_arc_finds_sectors_that_are_always_blocked():
@@ -66,3 +67,33 @@ def test_load_run_reads_back_what_the_logger_wrote(tmp_path):
     assert run["sectors"].shape == (3, 72)
     assert len(run["frames"]) == 3
     assert len(run["scans"]) == 1
+
+
+# --- agrupamento do arco em trechos contiguos (o relatorio de min/max mentia) ---
+
+def test_blocked_runs_groups_a_simple_contiguous_arc():
+    assert blocked_runs([20, 21, 22, 23], 72) == [[20, 21, 22, 23]]
+
+
+def test_blocked_runs_joins_the_arc_that_crosses_zero():
+    # A carroceria pode ocluir em volta da FRENTE. Reportar min/max daria
+    # "2.5 a 357.5 graus", que se le como o circulo inteiro bloqueado, quando
+    # sao 6 setores = 30 graus.
+    assert blocked_runs([0, 1, 2, 69, 70, 71], 72) == [[69, 70, 71, 0, 1, 2]]
+
+
+def test_blocked_runs_keeps_disjoint_arcs_separate():
+    # um setor solto + um bloco: sao dois trechos, nao um arco de 5 a 41
+    assert blocked_runs([5, 30, 31, 32], 72) == [[5], [30, 31, 32]]
+
+
+def test_blocked_runs_empty_when_nothing_is_blocked():
+    assert blocked_runs([], 72) == []
+
+
+def test_blocked_runs_handles_the_whole_circle_without_duplicating():
+    # borda: tudo bloqueado comeca em 0 E termina em 71, mas nao deve juntar
+    # consigo mesmo e repetir setores
+    runs = blocked_runs(list(range(72)), 72)
+    assert len(runs) == 1
+    assert sorted(runs[0]) == list(range(72))

@@ -68,6 +68,31 @@ def occlusion_arc(sectors, max_range, near_frac=0.5, blocked_frac=0.95, spread_f
     return [int(i) for i in np.nonzero(blocked)[0]]
 
 
+def blocked_runs(indices, n_sectors=72):
+    """Group blocked sector indices into contiguous runs, wrapping across 0.
+
+    Reporting ``min``/``max`` of the raw indices misleads in the two cases that
+    actually happen: an arc crossing 0 (an occlusion around the FRONT reads as
+    "2.5 to 357.5 degrees", i.e. the whole circle) and disjoint blocked sectors
+    (a lone sector plus a block reads as one huge arc spanning both).
+    """
+    idx = sorted(set(int(i) for i in indices))
+    if not idx:
+        return []
+    if len(idx) >= n_sectors:
+        return [idx]
+    runs = [[idx[0]]]
+    for i in idx[1:]:
+        if i == runs[-1][-1] + 1:
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    # o arco pode cruzar o zero: ultimo trecho encosta em n-1 e o primeiro em 0
+    if len(runs) > 1 and runs[0][0] == 0 and runs[-1][-1] == n_sectors - 1:
+        runs[0] = runs.pop() + runs[0]
+    return runs
+
+
 def fps_stats(frames):
     """Loop timing. The sim ran at 20 Hz; well under that and the car reacts late."""
     dts = [f["dt"] for f in frames if f.get("dt", 0.0) > 0.0]
@@ -103,10 +128,17 @@ def main():
         print("nenhum setor sempre bloqueado. Se o LiDAR estava montado no carro,")
         print("desconfie: ou o feixe passa por cima da carroceria, ou faltou dado.")
     else:
-        graus = [sector_to_deg(i, n_sectors) for i in arc]
+        runs = blocked_runs(arc, n_sectors)
         print("%d de %d setores (%.0f%% do circulo) sempre bloqueados"
               % (len(arc), n_sectors, 100.0 * len(arc) / n_sectors))
-        print("angulos: %.1f deg a %.1f deg" % (min(graus), max(graus)))
+        for r in runs:
+            print("   trecho: %6.1f deg a %6.1f deg  (%d setores, %.0f deg de arco)"
+                  % (sector_to_deg(r[0], n_sectors), sector_to_deg(r[-1], n_sectors),
+                     len(r), len(r) * 360.0 / n_sectors))
+        if len(runs) > 1:
+            print("   (%d trechos SEPARADOS: se a carroceria e uma peca so, desconfie"
+                  % len(runs))
+            print("    de ruido ou de algo parado no cenario entrando na conta)")
         print("-> fov_deg sugerido para o retreino: %.0f"
               % (360.0 * (n_sectors - len(arc)) / n_sectors))
 
