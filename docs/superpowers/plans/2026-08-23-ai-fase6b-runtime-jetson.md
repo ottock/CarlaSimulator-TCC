@@ -45,10 +45,6 @@ O modelo devolve steer em [-1, 1]; o servo fala microssegundos. Este mapa e o
 ultimo ponto antes do hardware, entao ele tem de ser seguro mesmo recebendo lixo:
 um NaN ou um valor fora de faixa NAO pode virar um comando extremo no servo.
 """
-import math
-
-import pytest
-
 from ai.car.control_map import (
     ESC_NEUTRAL_US,
     STEER_CENTER_US,
@@ -85,6 +81,16 @@ def test_out_of_range_is_clamped_not_wrapped():
 
 def test_nan_is_centre():
     assert steer_to_us(float("nan")) == STEER_CENTER_US
+
+
+def test_positive_infinity_is_hard_right():
+    # int(round(inf)) levanta OverflowError; uma excecao aqui mata o laco de
+    # controle e o servo fica congelado no ultimo comando
+    assert steer_to_us(float("inf")) == STEER_RIGHT_US
+
+
+def test_negative_infinity_is_hard_left():
+    assert steer_to_us(float("-inf")) == STEER_LEFT_US
 
 
 def test_none_is_centre():
@@ -160,6 +166,10 @@ def steer_to_us(steer):
         return STEER_CENTER_US
     if s != s:  # NaN
         return STEER_CENTER_US
+    # Clampa ANTES de arredondar: int(round(inf)) levanta OverflowError, e uma
+    # excecao aqui mata o laco de controle e congela o ultimo PWM no servo.
+    # Clampar antes preserva a intencao: +inf = direita total, -inf = esquerda.
+    s = max(-1.0, min(1.0, s))
     us = int(round(STEER_CENTER_US + s * STEER_SPAN_US))
     return max(STEER_LEFT_US, min(STEER_RIGHT_US, us))
 
@@ -187,7 +197,7 @@ class FrameWatchdog:
 - [ ] **Step 4: Rodar os testes e ver passar**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_car_control_map.py -q`
-Expected: PASS, 12 passed
+Expected: PASS, 14 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1456,7 +1466,7 @@ Expected: PASS, 8 passed
 - [ ] **Step 5: Rodar a suíte inteira**
 
 Run: `.venv/Scripts/python.exe -m pytest -q`
-Expected: PASS, **182 passed** (125 do baseline + 57: 12 control_map + 8 coin_d6 + 7 scan_assembly + 7 image_crop + 8 config/export + 7 run_log + 8 loop). Se o número divergir, confira qual arquivo trouxe menos testes que o esperado antes de seguir.
+Expected: PASS, **184 passed** (125 do baseline + 59: 14 control_map + 8 coin_d6 + 7 scan_assembly + 7 image_crop + 8 config/export + 7 run_log + 8 loop). Se o número divergir, confira qual arquivo trouxe menos testes que o esperado antes de seguir.
 
 - [ ] **Step 6: Commit**
 
@@ -2031,7 +2041,7 @@ Expected: PASS, 7 passed
 - [ ] **Step 5: Rodar a suíte inteira**
 
 Run: `.venv/Scripts/python.exe -m pytest -q`
-Expected: PASS, **189 passed** (182 da Task 7 + 7 desta)
+Expected: PASS, **191 passed** (184 da Task 7 + 7 desta)
 
 - [ ] **Step 6: Commit**
 
