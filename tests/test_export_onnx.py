@@ -98,3 +98,26 @@ def test_synthetic_samples_have_the_model_input_shapes(tmp_path):
     assert lidars.shape == (5, 72) and lidars.dtype == np.float32
     assert lidars.min() >= 0.0 and lidars.max() <= 1.0   # LiDAR normalizado
     assert imgs.min() >= -1.0 and imgs.max() <= 1.0      # imagem em [-1, 1]
+
+
+def test_export_writes_a_json_sidecar_next_to_the_onnx(tmp_path):
+    # a engine TensorRT nao carrega os metadata_props; o Jetson le este JSON
+    import json
+    out = str(tmp_path / "m.onnx")
+    export_onnx(_ckpt(tmp_path / "m.pt", fov_deg=180.0), out, opset=11)
+    with open(str(tmp_path / "m.json")) as fh:
+        side = json.load(fh)
+    assert side["fov_deg"] == 180.0
+    assert side["n_sectors"] == 72
+    assert side["max_range_m"] == 12.0
+    assert side["arch"] == "DrivingNet"
+
+
+def test_sidecar_holds_numbers_not_strings(tmp_path):
+    import json
+    out = str(tmp_path / "m.onnx")
+    export_onnx(_ckpt(tmp_path / "m.pt", fov_deg=180.0), out, opset=11)
+    with open(str(tmp_path / "m.json")) as fh:
+        side = json.load(fh)
+    assert isinstance(side["fov_deg"], float)
+    assert isinstance(side["n_sectors"], int)

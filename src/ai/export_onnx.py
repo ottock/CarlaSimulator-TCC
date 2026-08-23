@@ -21,6 +21,7 @@ Uso (da raiz do repo):
     # sem dataset a mao: paridade em entradas sinteticas (fraca, so um smoke)
     python src/ai/export_onnx.py --model ... --out ...
 """
+import json
 import os
 import sys
 
@@ -93,6 +94,20 @@ def export_onnx(ckpt_path, out_path, opset=DEFAULT_OPSET, n_sectors=N_SECTORS,
         entry.key, entry.value = k, v
     onnx.checker.check_model(model_onnx)
     onnx.save(model_onnx, out_path)
+
+    # A engine TensorRT nao carrega os metadata_props: o fov_deg se perderia no
+    # trtexec. Este sidecar e lido no Jetson com a stdlib (sem o pacote onnx la).
+    sidecar_path = os.path.splitext(out_path)[0] + ".json"
+    sidecar = {
+        "arch": meta["arch"],
+        "fov_deg": float(meta["fov_deg"]),
+        "n_sectors": int(meta["n_sectors"]),
+        "max_range_m": float(meta["max_range_m"]),
+        "opset": int(meta["opset"]),
+        "source_checkpoint": meta["source_checkpoint"],
+    }
+    with open(sidecar_path, "w") as fh:
+        json.dump(sidecar, fh, indent=2, sort_keys=True)
     return meta
 
 
@@ -168,6 +183,7 @@ def main():
     print("metadados: fov_deg=%s  n_sectors=%s  max_range_m=%s"
           % (meta["fov_deg"], meta["n_sectors"], meta["max_range_m"]))
     print("onnx.checker: OK")
+    print("sidecar:   %s" % (os.path.splitext(out_path)[0] + ".json"))
 
     fov = float(meta["fov_deg"])
     if a.data:
