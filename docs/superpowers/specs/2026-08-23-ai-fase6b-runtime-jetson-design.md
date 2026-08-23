@@ -104,12 +104,18 @@ meta.json          config do modelo, fracao de corte, versao, ESC armado (sempre
 frames.jsonl       1 linha JSON por frame: t, steer, throttle, brake, servo_us, fps, dt
 sectors.npy        (N, 72) float32 — o vetor EXATO entregue ao modelo, ja normalizado
 scans.jsonl        1 linha por volta do LiDAR: t + a lista de (angulo, distancia) crus
-frames/000000.jpg  1 frame a cada N (padrao 10), no tamanho ja recortado
+frames/000000.jpg  1 frame a cada N (padrao 10), CRU (sem o recorte central)
 ```
 
 Formatos deliberadamente banais: `jsonl` e `npy` se leem no PC sem dependência nenhuma, e o
 `sectors.npy` casa com o formato do `lidar.npy` do dataset, então dá para comparar a entrada real
-com a de treino direto. O `scripts/analyze_car_log.py` lê isso no PC e devolve:
+com a de treino direto.
+
+**Os JPEGs são gravados CRUS, antes do recorte central.** Eles existem para *calibrar* a
+`crop_frac` — e um frame já recortado não deixa julgar se o recorte foi agressivo demais, o que
+exigiria outro teste no carro. Gravando cru, a decisão se toma offline.
+
+O `scripts/analyze_car_log.py` lê isso no PC e devolve:
 
 1. **Arco de oclusão** (medição de bancada #1) — quais ângulos devolvem distância curta constante.
 2. **Zero e sentido do ângulo** (medição #2) — comparando com um objeto em posição conhecida.
