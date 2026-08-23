@@ -29,6 +29,7 @@ class RunLogger:
         self._sectors = []
         self._frame_i = 0
         self._closed = False
+        self._close_count = 0
 
         # Recusa sobrescrever: um log ja gravado e o entregavel do teste no carro.
         # Erro claro em vez do OSError cru, porque isso estoura DEPOIS de a camera
@@ -41,7 +42,14 @@ class RunLogger:
         with io.open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as fh:
             fh.write(json.dumps(meta, indent=2, sort_keys=True))
         self._frames_fh = io.open(os.path.join(out_dir, "frames.jsonl"), "w", encoding="utf-8")
-        self._scans_fh = io.open(os.path.join(out_dir, "scans.jsonl"), "w", encoding="utf-8")
+        try:
+            self._scans_fh = io.open(os.path.join(out_dir, "scans.jsonl"), "w", encoding="utf-8")
+        except:
+            # Se a segunda abertura falha, a primeira fica aberta com nenhuma referencia
+            # alcancavel: __init__ nao retorna, logo ninguem nunca chama close(). Fechar
+            # e relancado para nao vazar o handle.
+            self._frames_fh.close()
+            raise
 
     def log_frame(self, t, sectors, control, servo_us, dt, frame_bgr=None):
         """Record one control cycle. ``control`` is ``(steer, throttle, brake)``."""
@@ -65,6 +73,7 @@ class RunLogger:
         if self._closed:
             return
         self._closed = True
+        self._close_count += 1
         self._frames_fh.close()
         self._scans_fh.close()
         if self._sectors:

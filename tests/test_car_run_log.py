@@ -78,8 +78,21 @@ def test_close_is_safe_to_call_twice(tmp_path):
     lg = RunLogger(str(tmp_path / "r"), meta={})
     lg.log_frame(t=0.0, sectors=np.ones(72, dtype=np.float32),
                  control=(0.0, 0.0, 0.0), servo_us=1500, dt=0.05)
+
+    # Verify initial state
+    assert lg._close_count == 0
+    assert lg._closed is False
+
     lg.close()
+    # Guard allowed the first close to run
+    assert lg._close_count == 1
+    assert lg._closed is True
+
     lg.close()
+    # Guard prevented the second close from running cleanup
+    assert lg._close_count == 1  # Did not increment
+    assert lg._closed is True
+
     assert np.load(str(tmp_path / "r" / "sectors.npy")).shape == (1, 72)
 
 
@@ -98,3 +111,39 @@ def test_refuses_to_overwrite_an_existing_run(tmp_path):
     with pytest.raises(IOError) as exc:
         RunLogger(str(d), meta={})
     assert str(d) in str(exc.value)
+
+
+def test_closes_first_handle_if_second_open_fails(tmp_path, monkeypatch):
+    # Se a segunda abertura (scans.jsonl) falha, a primeira (frames.jsonl) fica
+    # aberta sem nenhuma referencia alcancavel. __init__ nao retorna, logo ninguem
+    # pode chamar close(). Sem protecao, o handle vaza.
+    d = tmp_path / "r"
+    call_count = [0]
+
+    # Monkeypatch io.open para falhar na terceira chamada (scans.jsonl).
+    # Ordem: 1. meta.json (context manager), 2. frames.jsonl, 3. scans.jsonl (fail)
+    original_open = io.open
+
+    def failing_open(path, *args, **kwargs):
+        call_count[0] += 1
+        # Falhar na terceira chamada (scans.jsonl)
+        if call_count[0] == 3:
+            raise IOError("Simulated failure opening scans.jsonl")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(io, "open", failing_open)
+
+    # Tentar criar o RunLogger; a terceira abertura (scans.jsonl) devera falhar
+    with pytest.raises(IOError) as exc:
+        RunLogger(str(d), meta={})
+    assert "scans.jsonl" in str(exc.value)
+
+    # Verificar que a primeira abertura foi fechada corretamente.
+    # O arquivo frames.jsonl deveria ter sido criado e fechado.
+    frames_file = d.joinpath("frames.jsonl")
+    assert frames_file.exists()
+    # Tentar ler o arquivo para confirmar que nao esta locked/aberto
+    with io.open(str(frames_file), "r", encoding="utf-8") as fh:
+        content = fh.read()
+    # Arquivo vazio, pois nenhum frame foi logado (excecao no __init__)
+    assert content == ""
