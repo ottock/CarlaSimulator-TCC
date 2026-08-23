@@ -41,9 +41,13 @@ class FakeEngine:
     def __init__(self, out=(0.5, 0.4, 0.0)):
         self.out = out
         self.calls = 0
+        self.last_img = None
+        self.last_lidar = None
 
     def infer(self, img, lidar):
         self.calls += 1
+        self.last_img = img
+        self.last_lidar = lidar
         return self.out
 
 
@@ -147,6 +151,27 @@ def test_the_lidar_vector_is_masked_and_normalised():
     assert vec[0] == pytest.approx(0.5, abs=1e-6)
     # traseira: cega pela mascara de FOV 180 -> "livre"
     assert np.allclose(vec[18:54], 1.0)
+
+
+def test_the_engine_receives_the_same_masked_vector_and_a_preprocessed_frame():
+    # The other tests only look at the telemetry dict. Telemetry and the engine's
+    # actual input could silently diverge -- e.g. a refactor that logs the masked
+    # vector but infers on the raw one, or that forwards the raw frame straight to
+    # infer() instead of running it through prepare_frame/preprocess. All 8 other
+    # tests would stay green in either case, and the network would train on one
+    # distribution and drive on another. This test looks at what infer() was
+    # actually called with, not what the loop claims it did.
+    eng = FakeEngine(out=(0.5, 0.4, 0.0))
+    loop, kw = _loop(engine=eng)
+    loop.step()
+    tele = loop.step()
+    # Identity, not equality: a copy-and-diverge refactor (pass a fresh array with
+    # the same values instead of the one actually used) would still equal but not
+    # be the same object.
+    assert eng.last_lidar is tele["lidar_vec"]
+    # Proves the crop-and-preprocess chain actually ran -- the raw camera frame is
+    # (720, 1280, 3); only prepare_frame + preprocess produce this CHW model shape.
+    assert eng.last_img.shape == (3, 66, 200)
 
 
 def test_every_step_is_logged():
