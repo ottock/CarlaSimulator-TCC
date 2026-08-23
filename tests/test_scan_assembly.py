@@ -69,10 +69,26 @@ def test_revolution_with_too_few_points_is_dropped():
 def test_scan_keeps_the_angles_and_distances_intact():
     asm = ScanAssembler(min_points=2)
     asm.feed([(350.0, 1.0), (5.0, 9.9)])            # wrap inicial, descarta
-    # o (355, 7.7) antes do (1.0) e necessario: so uma QUEDA maior que 180 graus
-    # conta como wrap, entao 20 -> 1 nao fecharia a volta
+    # A volta fecha em 355 -> 1 (queda de 354 graus > 180). Aumentos normais como
+    # 5->10->20->355 nao fecham; so uma queda > wrap_drop_deg fecha a volta.
     scans = asm.feed([(10.0, 3.3), (20.0, 4.4), (355.0, 7.7), (1.0, 5.5)])
     assert scans[0][0] == (5.0, 9.9)
     assert (10.0, 3.3) in scans[0]
     assert (355.0, 7.7) in scans[0]
     assert (1.0, 5.5) not in scans[0]               # ja pertence a volta seguinte
+
+
+def test_small_backward_angle_step_does_not_close_revolution():
+    # Jitter entre pacotes: um passo para tras pequeno (< wrap_drop_deg) nao e um
+    # wrap. So uma QUEDA > wrap_drop_deg fecha a volta. Este teste garante que o
+    # codigo NAO ignora wrap_drop_deg.
+    asm = ScanAssembler(min_points=2)
+    asm.feed([(350.0, 1.0), (5.0, 2.0)])            # wrap inicial, descarta
+    # Passo para tras pequeno: 100 -> 95 e uma queda de 5 graus, nao fecha
+    scans = asm.feed([(10.0, 1.0), (100.0, 1.0), (95.0, 1.0), (350.0, 1.0), (5.0, 1.0)])
+    # 350->5 e uma queda de 345 > 180, entao fecha a volta
+    assert len(scans) == 1
+    assert len(scans[0]) == 5
+    # Verifica que 100 e 95 ficam no mesmo scan (nao dividiram na queda de 5)
+    assert scans[0][2] == (100.0, 1.0)
+    assert scans[0][3] == (95.0, 1.0)
