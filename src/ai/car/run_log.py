@@ -16,6 +16,8 @@ import os
 import cv2
 import numpy as np
 
+from ai.car.control_map import ESC_NEUTRAL_US
+
 N_SECTORS = 72
 
 
@@ -51,11 +53,19 @@ class RunLogger:
             self._frames_fh.close()
             raise
 
-    def log_frame(self, t, sectors, control, servo_us, dt, frame_bgr=None):
-        """Record one control cycle. ``control`` is ``(steer, throttle, brake)``."""
+    def log_frame(self, t, sectors, control, servo_us, dt, frame_bgr=None,
+                  esc_us=ESC_NEUTRAL_US, blocked=False):
+        """Record one control cycle. ``control`` is ``(steer, throttle, brake)``.
+
+        ``esc_us`` and ``blocked`` matter from the moment the car actually drives:
+        without them a run where the emergency stop fired the whole time would look
+        identical to a clean one. They default to "stopped, nothing in the way" so
+        the wheels-up phase logs the same shape.
+        """
         steer, throttle, brake = control
         row = {"t": float(t), "steer": float(steer), "throttle": float(throttle),
-               "brake": float(brake), "servo_us": int(servo_us), "dt": float(dt)}
+               "brake": float(brake), "servo_us": int(servo_us),
+               "esc_us": int(esc_us), "blocked": bool(blocked), "dt": float(dt)}
         self._frames_fh.write(json.dumps(row) + "\n")
         self._sectors.append(np.asarray(sectors, dtype=np.float32))
         if frame_bgr is not None and self._frame_i % self.jpeg_every == 0:

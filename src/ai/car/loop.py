@@ -1,9 +1,10 @@
 """The car's control loop, with its hardware injected (Fase 6b).
 
 Every dependency is passed in, so the whole safety envelope is testable on the PC
-with fakes: servo centred when data is missing, ESC never leaving neutral. The
-Jetson wiring lives in ``hardware/jetson_runtime.py`` and only supplies the real
-camera, LiDAR, engine and actuator.
+with fakes: servo centred when data is missing, and the car stopped whenever the
+constant cruise speed cannot be held. The Jetson wiring lives in
+``hardware/jetson_runtime.py`` and only supplies the real camera, LiDAR, engine
+and actuator.
 
 The perception chain reuses ``ai.shared.*`` unchanged -- the same functions the
 simulator ran. Reimplementing any of them here would be a silent inference bug.
@@ -14,7 +15,8 @@ import time
 
 import numpy as np
 
-from ai.car.control_map import ESC_NEUTRAL_US, STEER_CENTER_US, FrameWatchdog, steer_to_us
+from ai.car.control_map import (ESC_NEUTRAL_US, STEER_CENTER_US, FrameWatchdog,
+                               clamp_cruise_us, front_blocked, steer_to_us)
 from ai.car.image_crop import prepare_frame
 from ai.car.scan_assembly import ScanAssembler
 from ai.shared.image_pipeline import preprocess
@@ -25,7 +27,8 @@ class DriveLoop:
     """One ``step()`` = one control cycle."""
 
     def __init__(self, camera, lidar, engine, actuator, logger, fov_deg, max_range,
-                 crop_frac, n_sectors=72, clock=None, watchdog=None):
+                 crop_frac, n_sectors=72, clock=None, watchdog=None,
+                 cruise_us=ESC_NEUTRAL_US, stop_dist_m=0.25):
         self.camera = camera
         self.lidar = lidar
         self.engine = engine
@@ -35,6 +38,10 @@ class DriveLoop:
         self.max_range = max_range
         self.crop_frac = crop_frac
         self.n_sectors = n_sectors
+        # Velocidade CONSTANTE (sem aceleracao). O padrao e neutro: andar tem de
+        # ser um ato deliberado de quem chama, nunca o comportamento padrao.
+        self.cruise_us = cruise_us
+        self.stop_dist_m = stop_dist_m
         self.clock = clock or time.monotonic
         self.watchdog = watchdog or FrameWatchdog()
         self.assembler = ScanAssembler()
@@ -71,15 +78,26 @@ class DriveLoop:
             control = self.engine.infer(img, self._last_vec)
         servo_us = steer_to_us(control[0]) if can_drive else STEER_CENTER_US
 
+        # Velocidade constante enquanto tudo esta saudavel; ZERO em qualquer
+        # condicao degradada -- sem volta completa do LiDAR, sem imagem, laco
+        # travado, ou obstaculo dentro do cone frontal. A parada de emergencia e
+        # SEGURANCA, nao comportamento aprendido: a cabeca de freio esta inerte.
+        blocked = (self._last_vec is not None and
+                   front_blocked(self._last_vec, self.stop_dist_m / self.max_range))
+        esc_us = (clamp_cruise_us(self.cruise_us)
+                  if (can_drive and not blocked) else ESC_NEUTRAL_US)
+
         self.actuator.set_servo_us(servo_us)
-        self.actuator.set_esc_us(ESC_NEUTRAL_US)   # nunca sai de neutro nesta fase
+        self.actuator.set_esc_us(esc_us)
 
         vec = self._last_vec
         self.logger.log_frame(
             t=now,
             sectors=vec if vec is not None else np.ones(self.n_sectors, dtype=np.float32),
-            control=control, servo_us=servo_us, dt=dt, frame_bgr=frame)
+            control=control, servo_us=servo_us, dt=dt, frame_bgr=frame,
+            esc_us=esc_us, blocked=blocked)
         return {"t": now, "steer": control[0], "throttle": control[1],
-                "brake": control[2], "servo_us": servo_us, "dt": dt,
+                "brake": control[2], "servo_us": servo_us, "esc_us": esc_us,
+                "blocked": blocked, "dt": dt,
                 "stalled": stalled, "has_scan": self._last_vec is not None,
                 "lidar_vec": vec}

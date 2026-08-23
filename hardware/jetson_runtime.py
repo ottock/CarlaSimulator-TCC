@@ -39,13 +39,20 @@ import Adafruit_PCA9685
 
 from ai.car.coin_d6 import CoinD6Parser
 from ai.car.config import car_max_range, load_model_config
-from ai.car.control_map import ESC_NEUTRAL_US, STEER_CENTER_US
+from ai.car.control_map import ESC_MAX_US, ESC_MIN_MOVE_US, ESC_NEUTRAL_US, STEER_CENTER_US
 from ai.car.loop import DriveLoop
 from ai.car.run_log import RunLogger
 
 # ============================ SEGURANCA ============================
-# O carro NAO anda nesta fase. Nao e flag de linha de comando de proposito:
-# para armar o ESC alguem tem de editar este arquivo e saber o que faz.
+# Para o carro ANDAR sao precisas DUAS coisas independentes:
+#   1. ESC_ARMADO = True aqui (exige editar o arquivo -- nao e flag de CLI de
+#      proposito, para ninguem armar sem querer num comando copiado);
+#   2. --cruise-us acima de 1600 na linha de comando.
+# Faltando qualquer uma, o ESC fica em neutro e o carro nao sai do lugar.
+#
+# A velocidade e CONSTANTE (sem aceleracao) e vai a ZERO em qualquer condicao
+# degradada: sem volta completa do LiDAR, sem imagem, laco travado, ou obstaculo
+# dentro do cone frontal (parada de emergencia).
 ESC_ARMADO = False
 # ===================================================================
 
@@ -203,15 +210,29 @@ def main():
                         "0.48 e um CHUTE a calibrar; 1.0 desliga o recorte.")
     p.add_argument("--scale", type=float, default=12.0, help="Escala do modelo (1:12)")
     p.add_argument("--jpeg-every", type=int, default=10)
+    p.add_argument("--cruise-us", type=int, default=ESC_NEUTRAL_US,
+                   help="PWM CONSTANTE do ESC. %d = parado (padrao); o ESC so move a "
+                        "partir de %d; maximo %d. Exige ESC_ARMADO=True no arquivo."
+                        % (ESC_NEUTRAL_US, ESC_MIN_MOVE_US, ESC_MAX_US))
+    p.add_argument("--stop-dist", type=float, default=0.25,
+                   help="Parada de emergencia: metros no cone frontal (padrao 0.25)")
     a = p.parse_args()
 
     cfg = load_model_config(a.config)
     max_range = car_max_range(cfg, scale=a.scale)
     print("modelo: fov={0} deg  n_sectors={1}  max_range no carro={2:.3f} m"
           .format(cfg["fov_deg"], cfg["n_sectors"], max_range))
-    print("ESC ARMADO: {0}".format(ESC_ARMADO))
+    anda = ESC_ARMADO and a.cruise_us >= ESC_MIN_MOVE_US
+    print("ESC ARMADO: {0}   cruise={1}us   parada de emergencia: {2:.2f} m"
+          .format(ESC_ARMADO, a.cruise_us, a.stop_dist))
     if not ESC_ARMADO:
-        print("O carro NAO anda. Rodas no ar recomendado mesmo assim.")
+        print("O carro NAO anda (ESC_ARMADO=False). Rodas no ar mesmo assim.")
+    elif a.cruise_us < ESC_MIN_MOVE_US:
+        print("O carro NAO anda: --cruise-us {0} esta abaixo de {1} (zona morta do ESC)."
+              .format(a.cruise_us, ESC_MIN_MOVE_US))
+    if anda:
+        print("!!! O CARRO VAI ANDAR a {0}us constantes. Kill switch na mao. !!!"
+              .format(a.cruise_us))
 
     camera = CsiCamera()
     lidar = SerialLidar()
@@ -222,12 +243,14 @@ def main():
         "fov_deg": cfg["fov_deg"], "n_sectors": cfg["n_sectors"],
         "max_range_m_car": max_range, "scale": a.scale,
         "crop_frac": a.crop_frac, "esc_armado": ESC_ARMADO,
+        "cruise_us": a.cruise_us, "stop_dist_m": a.stop_dist,
         "engine": os.path.basename(a.engine),
     }, jpeg_every=a.jpeg_every)
 
     loop = DriveLoop(camera=camera, lidar=lidar, engine=engine, actuator=actuator,
                      logger=logger, fov_deg=cfg["fov_deg"], max_range=max_range,
-                     crop_frac=a.crop_frac, n_sectors=cfg["n_sectors"])
+                     crop_frac=a.crop_frac, n_sectors=cfg["n_sectors"],
+                     cruise_us=a.cruise_us, stop_dist_m=a.stop_dist)
 
     t_end = time.monotonic() + a.seconds
     n, t_report = 0, time.monotonic()
@@ -237,9 +260,10 @@ def main():
             n += 1
             if time.monotonic() - t_report >= 1.0:
                 fps = n / (time.monotonic() - t_report)
-                print("fps={0:5.1f}  steer={1:+.3f}  servo={2}us  scan={3}".format(
-                    fps, tele["steer"], tele["servo_us"],
-                    "ok" if tele["has_scan"] else "AGUARDANDO"))
+                print("fps={0:5.1f}  steer={1:+.3f}  servo={2}us  esc={3}us{4}  scan={5}"
+                      .format(fps, tele["steer"], tele["servo_us"], tele["esc_us"],
+                              "  PARADA" if tele["blocked"] else "",
+                              "ok" if tele["has_scan"] else "AGUARDANDO"))
                 n, t_report = 0, time.monotonic()
     except KeyboardInterrupt:
         print("\ninterrompido")

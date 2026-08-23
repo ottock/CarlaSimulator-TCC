@@ -147,3 +147,35 @@ def test_closes_first_handle_if_second_open_fails(tmp_path, monkeypatch):
     # Sem a protecao, o handle ficaria aberto (closed=False).
     assert 'frames_fh' in captured_handles
     assert captured_handles['frames_fh'].closed is True
+
+
+def test_the_esc_command_and_the_stop_flag_are_recorded(tmp_path):
+    """Sem isso o log nao distingue 'andando' de 'parado pela seguranca'.
+
+    A partir da parte 2 o carro anda a velocidade constante, e o unico registro do
+    que de fato foi comandado ao ESC e este. Sem ele, uma corrida em que a parada
+    de emergencia disparou o tempo todo pareceria identica a uma corrida normal.
+    """
+    lg = RunLogger(str(tmp_path / "r"), meta={"fov_deg": 180.0}, jpeg_every=100)
+    sect = np.full(72, 0.5, dtype=np.float32)
+    lg.log_frame(t=0.0, sectors=sect, control=(0.1, 0.0, 0.0), servo_us=1520,
+                 dt=0.05, esc_us=1650, blocked=False)
+    lg.log_frame(t=1.0, sectors=sect, control=(0.1, 0.0, 0.0), servo_us=1520,
+                 dt=0.05, esc_us=1500, blocked=True)
+    lg.close()
+
+    with io.open(os.path.join(str(tmp_path / "r"), "frames.jsonl"), encoding="utf-8") as fh:
+        rows = [json.loads(l) for l in fh if l.strip()]
+    assert [r["esc_us"] for r in rows] == [1650, 1500]
+    assert [r["blocked"] for r in rows] == [False, True]
+
+
+def test_esc_defaults_keep_older_callers_working(tmp_path):
+    lg = RunLogger(str(tmp_path / "r2"), meta={}, jpeg_every=100)
+    lg.log_frame(t=0.0, sectors=np.ones(72, dtype=np.float32),
+                 control=(0.0, 0.0, 0.0), servo_us=1500, dt=0.05)
+    lg.close()
+    with io.open(os.path.join(str(tmp_path / "r2"), "frames.jsonl"), encoding="utf-8") as fh:
+        row = json.loads(fh.readline())
+    assert row["esc_us"] == 1500
+    assert row["blocked"] is False

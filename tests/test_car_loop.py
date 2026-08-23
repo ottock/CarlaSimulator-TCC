@@ -105,8 +105,9 @@ def test_servo_follows_the_model_once_a_revolution_arrives():
     assert kw["actuator"].servo_history[-1] == 1600
 
 
-def test_esc_is_always_neutral():
-    # a trava desta fase: o carro nao anda, ponto
+def test_esc_is_neutral_by_default():
+    # Sem cruise_us configurado o carro NAO anda. Andar tem de ser um ato
+    # deliberado (passar a velocidade), nunca o comportamento padrao.
     loop, kw = _loop()
     loop.step()
     loop.step()
@@ -186,3 +187,73 @@ def test_completed_revolutions_are_logged_raw():
     loop.step()
     loop.step()
     assert len(kw["logger"].scans) == 1
+
+
+# ---------------------------------------------------------------------------
+# Velocidade de cruzeiro constante (Fase 6b parte 2)
+#
+# Regra do Rafael: velocidade CONSTANTE onde nao ha aceleracao; se ela nao puder
+# ser constante, a velocidade e ZERO. Estes testes provam as duas metades.
+# ---------------------------------------------------------------------------
+
+class NearLidar(FakeLidar):
+    """Volta completa com um obstaculo colado na frente (0.1 m) e livre dos lados."""
+
+    def __init__(self):
+        FakeLidar.__init__(self)
+
+        def d(a):
+            return 0.1 if (a <= 10 or a >= 350) else 0.5
+
+        frag = [(float(a), d(a)) for a in range(300, 360, 2)]
+        rev = [(float(a), d(a)) for a in range(0, 360, 2)]
+        self.batches = [frag + rev, list(rev), list(rev)]
+
+
+def test_cruise_drives_the_esc_when_everything_is_healthy():
+    loop, kw = _loop(cruise_us=1650)
+    loop.step()
+    loop.step()
+    assert kw["actuator"].esc_history[-1] == 1650
+
+
+def test_cruise_is_zero_before_a_complete_revolution():
+    # Mesma razao do servo: sem uma volta inteira o vetor tem buracos que a rede
+    # leria como "livre". Andar com um mapa falso e pior do que ficar parado.
+    lidar = FakeLidar()
+    lidar.batches = [[(0.0, 2.0), (10.0, 2.0)]]
+    loop, kw = _loop(lidar=lidar, cruise_us=1650)
+    loop.step()
+    assert kw["actuator"].esc_history == [ESC_NEUTRAL_US]
+
+
+def test_cruise_is_zero_when_the_front_is_blocked():
+    # A parada de emergencia e um item de SEGURANCA, nao um comportamento
+    # aprendido: a cabeca de freio do modelo esta inerte (dataset com 0% de
+    # frenagem), entao parar nao pode depender dela.
+    loop, kw = _loop(lidar=NearLidar(), cruise_us=1650)
+    loop.step()
+    tele = loop.step()
+    assert tele["blocked"] is True
+    assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US
+
+
+def test_a_wall_beside_the_car_does_not_stop_it():
+    # Numa pista de 0.53 m as paredes laterais estao SEMPRE perto. Se a parada
+    # olhasse o circulo inteiro, o carro nunca sairia do lugar.
+    loop, kw = _loop(cruise_us=1650)          # FakeLidar: 0.5 m em todas as direcoes
+    loop.step()
+    tele = loop.step()
+    assert tele["blocked"] is False
+    assert kw["actuator"].esc_history[-1] == 1650
+
+
+def test_cruise_is_zero_on_a_stalled_frame():
+    clock = iter([100.0, 100.05, 100.6]).__next__
+    loop, kw = _loop(clock=clock, cruise_us=1650)
+    loop.step()
+    loop.step()
+    assert kw["actuator"].esc_history[-1] == 1650
+    tele = loop.step()
+    assert tele["stalled"] is True
+    assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US
