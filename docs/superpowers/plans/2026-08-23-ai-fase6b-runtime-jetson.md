@@ -984,7 +984,7 @@ stdlib. car_max_range() deriva o 1.0 do carro de 12.0/12 em vez de hardcodar."
 
 **Interfaces:**
 - Consumes: nada dos módulos anteriores.
-- Produces: `RunLogger(out_dir, meta, jpeg_every=10)` com `.log_frame(t, sectors, control, servo_us, dt, frame_bgr=None)`, `.log_scan(t, points)` e `.close()`.
+- Produces: `RunLogger(out_dir, meta, jpeg_every=10, n_sectors=72)` com `.log_frame(t, sectors, control, servo_us, dt, frame_bgr=None)`, `.log_scan(t, points)` e `.close()`.
 
 **Atenção ao nome:** o módulo chama-se `run_log.py`, **não** `logging.py` — o `requirements.txt` do projeto tem um aviso explícito sobre não sombrear o `logging` da stdlib.
 
