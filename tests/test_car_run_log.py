@@ -119,17 +119,22 @@ def test_closes_first_handle_if_second_open_fails(tmp_path, monkeypatch):
     # pode chamar close(). Sem protecao, o handle vaza.
     d = tmp_path / "r"
     call_count = [0]
+    captured_handles = {}
 
-    # Monkeypatch io.open para falhar na terceira chamada (scans.jsonl).
+    # Monkeypatch io.open para capturar o primeiro handle e falhar na terceira chamada.
     # Ordem: 1. meta.json (context manager), 2. frames.jsonl, 3. scans.jsonl (fail)
     original_open = io.open
 
     def failing_open(path, *args, **kwargs):
         call_count[0] += 1
+        fh = original_open(path, *args, **kwargs)
+        # Capturar o handle de frames.jsonl para inspecao depois
+        if call_count[0] == 2:
+            captured_handles['frames_fh'] = fh
         # Falhar na terceira chamada (scans.jsonl)
         if call_count[0] == 3:
             raise IOError("Simulated failure opening scans.jsonl")
-        return original_open(path, *args, **kwargs)
+        return fh
 
     monkeypatch.setattr(io, "open", failing_open)
 
@@ -138,12 +143,7 @@ def test_closes_first_handle_if_second_open_fails(tmp_path, monkeypatch):
         RunLogger(str(d), meta={})
     assert "scans.jsonl" in str(exc.value)
 
-    # Verificar que a primeira abertura foi fechada corretamente.
-    # O arquivo frames.jsonl deveria ter sido criado e fechado.
-    frames_file = d.joinpath("frames.jsonl")
-    assert frames_file.exists()
-    # Tentar ler o arquivo para confirmar que nao esta locked/aberto
-    with io.open(str(frames_file), "r", encoding="utf-8") as fh:
-        content = fh.read()
-    # Arquivo vazio, pois nenhum frame foi logado (excecao no __init__)
-    assert content == ""
+    # Verificar que o try/except na __init__ realmente fechou o primeiro handle.
+    # Sem a protecao, o handle ficaria aberto (closed=False).
+    assert 'frames_fh' in captured_handles
+    assert captured_handles['frames_fh'].closed is True
