@@ -515,11 +515,25 @@ def test_revolution_with_too_few_points_is_dropped():
     assert scans == []
 
 
+def test_small_backward_angle_step_does_not_close_revolution():
+    # Jitter entre pacotes: um passo para tras pequeno (< wrap_drop_deg) nao e um
+    # wrap. So uma QUEDA > wrap_drop_deg fecha a volta. Este teste garante que o
+    # codigo NAO ignora wrap_drop_deg -- sem ele, os outros 7 testes passariam
+    # mesmo se a condicao virasse "qualquer decrescimo".
+    asm = ScanAssembler(min_points=2)
+    asm.feed([(350.0, 1.0), (5.0, 2.0)])            # wrap inicial, descarta
+    scans = asm.feed([(10.0, 1.0), (100.0, 1.0), (95.0, 1.0), (350.0, 1.0), (5.0, 1.0)])
+    assert len(scans) == 1
+    assert len(scans[0]) == 5
+    assert scans[0][2] == (100.0, 1.0)              # 100 e 95 no MESMO scan
+    assert scans[0][3] == (95.0, 1.0)
+
+
 def test_scan_keeps_the_angles_and_distances_intact():
     asm = ScanAssembler(min_points=2)
     asm.feed([(350.0, 1.0), (5.0, 9.9)])            # wrap inicial, descarta
-    # o (355, 7.7) antes do (1.0) e necessario: so uma QUEDA maior que 180 graus
-    # conta como wrap, entao 20 -> 1 nao fecharia a volta
+    # o (355, 7.7) e o que faz a volta fechar: 355 -> 1 e uma queda de 354 > 180.
+    # Os incrementos 5 -> 10 -> 20 -> 355 nao fecham nada.
     scans = asm.feed([(10.0, 3.3), (20.0, 4.4), (355.0, 7.7), (1.0, 5.5)])
     assert scans[0][0] == (5.0, 9.9)
     assert (10.0, 3.3) in scans[0]
@@ -587,7 +601,7 @@ class ScanAssembler:
 - [ ] **Step 4: Rodar os testes e ver passar**
 
 Run: `.venv/Scripts/python.exe -m pytest tests/test_scan_assembly.py -q`
-Expected: PASS, 7 passed
+Expected: PASS, 8 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1466,7 +1480,7 @@ Expected: PASS, 8 passed
 - [ ] **Step 5: Rodar a suíte inteira**
 
 Run: `.venv/Scripts/python.exe -m pytest -q`
-Expected: PASS, **184 passed** (125 do baseline + 59: 14 control_map + 8 coin_d6 + 7 scan_assembly + 7 image_crop + 8 config/export + 7 run_log + 8 loop). Se o número divergir, confira qual arquivo trouxe menos testes que o esperado antes de seguir.
+Expected: PASS, **185 passed** (125 do baseline + 60: 14 control_map + 8 coin_d6 + 8 scan_assembly + 7 image_crop + 8 config/export + 7 run_log + 8 loop). Se o número divergir, confira qual arquivo trouxe menos testes que o esperado antes de seguir.
 
 - [ ] **Step 6: Commit**
 
@@ -2041,7 +2055,7 @@ Expected: PASS, 7 passed
 - [ ] **Step 5: Rodar a suíte inteira**
 
 Run: `.venv/Scripts/python.exe -m pytest -q`
-Expected: PASS, **191 passed** (184 da Task 7 + 7 desta)
+Expected: PASS, **192 passed** (185 da Task 7 + 7 desta)
 
 - [ ] **Step 6: Commit**
 
