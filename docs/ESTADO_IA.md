@@ -37,7 +37,7 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 | **4** | Pista custom (gêmeo digital) | ✅ **3/3 pistas limpas**; ablação **decisiva** — o LiDAR provou valor (§5.7) |
 | 5 | Refino final do modelo (touch-ups) | ⏸️ **ADIADA** (decisão do Rafael) — o modelo atual já serve para o carrinho |
 | **6a** | **Modelo 180° + export ONNX** (não precisa do carro) | ✅ **3/3 pistas limpas** com FOV 180°; ONNX exportado e com paridade provada |
-| **6b** | Jetson: bancada + runtime (TensorRT + PCA9685) | ⬜ **PRÓXIMA** — precisa do carro |
+| **6b** | Jetson: bancada + runtime (TensorRT + PCA9685) | 🔶 **runtime CONSTRUÍDO e testado no PC** (200 testes); falta **rodar no carro** |
 | 7 | Pista física / gap sim-to-real | ⬜ Deferido |
 
 **Marco da Fase 2 (`cam_v2.pt`):** modelo só-câmera dirige **~171 s** centrado a
@@ -73,7 +73,7 @@ no destino, errada na causa.
 **A ressalva (Fases 2–3):** ainda erra em **cruzamentos complexos** (§5.3) — limite
 conhecido do BC mono-câmera, **inexistente na pista fechada 1:12** (Estágio B).
 
-**Qualidade:** 125 testes unitários (`pytest -q`), TDD nas partes puras.
+**Qualidade:** 200 testes unitários (`pytest -q`), TDD nas partes puras.
 
 ---
 
@@ -93,6 +93,17 @@ repo; o `src` é injetado no `sys.path` por cada script.
   para `[-180,+180]`, satisfaz `|ângulo| ≤ fov_deg/2`; `fov_deg ≥ 360` é no-op.
   **Não muta a entrada** — o `lidar.npy` guarda sempre os 360° e a máscara é
   transformação de saída, então mudar o FOV **não** exige recoletar.
+
+**Carro (`src/ai/car/`, Fase 6b — puro e Python 3.6-safe, testado no PC):**
+- `coin_d6.py` — parser canônico do LiDAR real, emitindo `(ângulo, distância)`. Substitui
+  as duas cópias divergentes que havia em `hardware/`.
+- `scan_assembly.py` — agrupa os pontos em **voltas completas** (fecha no wrap do ângulo).
+  Fechar por contagem deixaria setores não varridos lendo "livre" — buraco na parede.
+- `control_map.py` — `steer` → microssegundos do servo, clampado; watchdog de frame.
+- `image_crop.py` — recorte central, para aproximar a lente de 130° do FOV de 62.2° do treino.
+- `config.py` — lê o sidecar JSON do modelo; `car_max_range()` deriva o 1.0 do carro de 12.0/12.
+- `run_log.py` — grava o log da corrida (jsonl + npy).
+- `loop.py` — `DriveLoop` com hardware injetado; é aqui que o envelope de segurança é testado.
 
 **Percepção / utilidades:**
 - `sim_lidar.py` — nuvem do CARLA → setores em metros (filtro de chão z∈[-1.7,2.0],

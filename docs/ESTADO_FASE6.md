@@ -79,10 +79,19 @@ O `lidar.npy` guarda sempre os 360°: **mudar o FOV é retreinar, não recoletar
 **Objetivo:** ver o modelo esterçando o servo de verdade, sem risco. O `controle_teste.py`
 já tem `ESC_ARMADO = False`, então o carro **não anda**; só o servo (ch15) responde.
 
-**O que falta construir:** um runtime que troque o **teclado** do `controle_teste.py` pelo
-**modelo**. Reusar de lá: `CoinD6Parser`, o setup do PCA9685, o `watchdog` e o `ESC_ARMADO`.
-Reusar de `src/ai/shared/`: `preprocess`, `scan_to_sectors_m`, `apply_fov_mask`,
-`normalize_sectors_m` — **nunca reimplementar**.
+**Construído (2026-08-23).** `hardware/jetson_runtime.py` é o executável: adaptadores de
+câmera CSI, LiDAR serial, engine TensorRT e PCA9685, mais o `main`. A lógica que dá para
+errar vive em `src/ai/car/` e é testada no PC: parser do COIN-D6, montagem da volta,
+mapa do servo, config e o `DriveLoop` (que prova, com dublês, que o servo centraliza sem
+dado e que o ESC nunca sai de neutro). O `scripts/analyze_car_log.py` transforma o log
+nas medições #1 e #2.
+
+Rodar:
+
+    /usr/src/tensorrt/bin/trtexec --onnx=driving_track_180.onnx         --saveEngine=driving_track_180.engine --fp16
+    python3 hardware/jetson_runtime.py --engine driving_track_180.engine         --config driving_track_180.json --out runs/car_teste1 --seconds 60
+    # de volta no PC:
+    python scripts/analyze_car_log.py runs/car_teste1
 
 Ordem:
 1. Copiar `driving_track_180.onnx` para o Jetson.
