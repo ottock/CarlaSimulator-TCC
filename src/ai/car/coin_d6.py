@@ -19,11 +19,22 @@ MAX_SAMPLES_PER_PACKET = 50
 HEADER = b"\xAA\x55"
 
 
+# Alcance MINIMO do sensor. O filtro original era so 0/1 mm, entao 2 mm passava.
+# Medido nos 257.948 pontos das corridas de pista (2026-09-12): 1.40% dos pontos
+# ficam abaixo de 5 mm, NENHUM ponto cai entre 5 mm e 0.20 m, e 98.6% estao em
+# 0.20 m ou mais. Essa faixa vazia de 195 mm e a fronteira entre ruido e medida,
+# entao 0.05 m tem margem larga dos dois lados -- nao e chute.
+# Tem de ficar bem abaixo de 0.20 m: a pista tem 0.53 m de largura, entao as
+# paredes reais aparecem por volta de 0.26 m e nao podem ser filtradas.
+MIN_RANGE_M = 0.05
+
+
 class CoinD6Parser:
     """Feed it raw serial bytes, get back polar points."""
 
-    def __init__(self, max_range_m=MAX_RANGE_M):
+    def __init__(self, max_range_m=MAX_RANGE_M, min_range_m=MIN_RANGE_M):
         self.max_range_m = max_range_m
+        self.min_range_m = min_range_m
         self.buffer = bytearray()
         self.parse_errors = 0
 
@@ -72,9 +83,12 @@ class CoinD6Parser:
             if offset + 2 >= len(pkt):
                 break
             dist_mm = pkt[offset + 1] | (pkt[offset + 2] << 8)
-            if dist_mm <= 1:                     # 0/1 mm = sem leitura
-                continue
             dist_m = dist_mm / 1000.0
+            # Abaixo do alcance minimo NAO e um obstaculo colado no carro, e
+            # ruido: uma parede a 0 m e fisicamente impossivel, e normalizada
+            # vira 0.0 = "encostado", a leitura mais perigosa possivel.
+            if dist_m < self.min_range_m:
+                continue
             if dist_m > self.max_range_m:
                 continue
             out.append(((start_angle + i * step) % 360.0, dist_m))

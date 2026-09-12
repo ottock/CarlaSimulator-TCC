@@ -87,3 +87,38 @@ def test_absurd_sample_count_is_rejected_without_hanging():
     pts = p.feed(bytes(bad) + _packet(10.0, 20.0, [1000]))
     assert len(pts) == 1                        # recupera e acha o pacote bom
     assert p.parse_errors >= 1
+
+
+# ---------------------------------------------------------------------------
+# Alcance MINIMO (medido nos logs de pista de 2026-09-12)
+#
+# O filtro de 0/1 mm nao bastava: 2 mm passava e virava "obstaculo colado".
+# Nos 257.948 pontos das corridas de pista a separacao e perfeita:
+#     0.000 - 0.005 m :   3609 pontos (1.40%)   <- ruido
+#     0.005 - 0.200 m :      0 pontos           <- vazio absoluto
+#     0.200 m ou mais : 254339 pontos (98.6%)   <- medidas reais
+# Ha uma faixa de 195 mm sem NENHUM ponto entre o ruido e a menor medida real,
+# entao o limiar nao e chute: qualquer valor nessa faixa serve.
+# ---------------------------------------------------------------------------
+
+def test_returns_below_the_minimum_range_are_noise():
+    # 2 mm passava pelo filtro antigo e a rede lia parede encostada no carro
+    p = CoinD6Parser()
+    pts = p.feed(_packet(0.0, 10.0, [2, 3, 1500]))
+    assert len(pts) == 1
+    assert pts[0][1] == pytest.approx(1.5)
+
+
+def test_real_short_readings_are_kept():
+    # A pista tem 0.53 m de largura: com o carro no meio as paredes ficam a
+    # ~0.26 m. Um filtro agressivo demais apagaria a propria pista.
+    p = CoinD6Parser()
+    pts = p.feed(_packet(0.0, 10.0, [200, 260, 300]))
+    assert len(pts) == 3
+
+
+def test_the_minimum_range_is_configurable():
+    p = CoinD6Parser(min_range_m=0.30)
+    pts = p.feed(_packet(0.0, 10.0, [250, 400]))
+    assert len(pts) == 1
+    assert pts[0][1] == pytest.approx(0.4)
