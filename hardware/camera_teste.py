@@ -14,6 +14,8 @@
 #
 # Sair: tecla 'q' com a janela em foco, ou Ctrl+C no terminal.
 
+import sys
+
 import cv2
 
 # ---------------------------------------------------------------------------
@@ -31,10 +33,10 @@ CAP_FPS    = 60
 DISP_WIDTH  = 960
 DISP_HEIGHT = 540
 
-# A IMX219 costuma vir de cabeca pra baixo em muitos modulos.
-# flip-method=2 gira 180 graus. Se a imagem aparecer invertida,
-# troque para 0 (sem giro) ou outro valor (0-7).
-FLIP_METHOD = 2
+# Rotacao da imagem. 0 = sem giro, 2 = 180 graus (0-7 sao validos).
+# Padrao 0 desde 2026-09-12: com 2 a imagem saiu de ponta-cabeca no carro.
+# Da para testar sem editar o arquivo:  python3 camera_teste.py 2
+FLIP_METHOD = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 
 
 def build_gstreamer_pipeline():

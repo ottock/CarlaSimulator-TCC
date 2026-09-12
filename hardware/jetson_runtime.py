@@ -74,7 +74,13 @@ CMD_START = bytes([0xAA, 0x55, 0xF0, 0x0F])
 CMD_STOP = bytes([0xAA, 0x55, 0xF5, 0x0A])
 
 CAP_WIDTH, CAP_HEIGHT, CAP_FPS = 1280, 720, 60
-FLIP_METHOD = 2          # o modulo IMX219 vem de cabeca pra baixo (ver camera_teste.py)
+# Rotacao da imagem (nvvidconv flip-method): 0 = sem giro, 2 = 180 graus.
+# Padrao 0 desde 2026-09-12: com 2 a imagem saia de PONTA-CABECA no carro.
+# Isto NAO e cosmetico -- o modelo treinou com imagem na posicao certa, entao
+# uma imagem invertida e uma entrada que ele nunca viu, e o esterco vira lixo.
+# Ajustavel por --flip-method, para nao precisar editar o arquivo se a camera
+# for remontada de outro jeito.
+FLIP_METHOD = 0
 
 
 class CsiCamera:
@@ -223,6 +229,9 @@ def main():
                         % (ESC_NEUTRAL_US, ESC_MIN_MOVE_US, ESC_MAX_US))
     p.add_argument("--stop-dist", type=float, default=0.25,
                    help="Parada de emergencia: metros no cone frontal (padrao 0.25)")
+    p.add_argument("--flip-method", type=int, default=FLIP_METHOD,
+                   help="Rotacao da camera: 0 = sem giro (padrao), 2 = 180 graus. "
+                        "Imagem invertida e entrada fora da distribuicao de treino.")
     a = p.parse_args()
 
     cfg = load_model_config(a.config)
@@ -241,7 +250,7 @@ def main():
         print("!!! O CARRO VAI ANDAR a {0}us constantes. Kill switch na mao. !!!"
               .format(a.cruise_us))
 
-    camera = CsiCamera()
+    camera = CsiCamera(flip_method=a.flip_method)
     lidar = SerialLidar()
     engine = TrtEngine(a.engine)
     actuator = Pca9685Actuator()
@@ -251,6 +260,7 @@ def main():
         "max_range_m_car": max_range, "scale": a.scale,
         "crop_frac": a.crop_frac, "esc_armado": ESC_ARMADO,
         "cruise_us": a.cruise_us, "stop_dist_m": a.stop_dist,
+        "flip_method": a.flip_method,
         "engine": os.path.basename(a.engine),
     }, jpeg_every=a.jpeg_every)
 
