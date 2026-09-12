@@ -100,3 +100,34 @@ def test_driving_dataset_fov_does_not_corrupt_the_cached_raw_array(tmp_path):
     ds[1]
     raw = ds._lidar_array(build_index([str(tmp_path / "ep_0001")])[1]["lidar"])
     assert np.allclose(np.asarray(raw[1]), 1.0)    # continua full(1.0) em metros
+
+
+def test_photometric_augmentation_only_changes_the_image(tmp_path):
+    """O aumento nao pode tocar no alvo nem no LiDAR.
+
+    O rotulo de esterco depende de ONDE as coisas estao. Se o aumento mexesse na
+    geometria (ou no vetor do LiDAR), ele ensinaria o alvo errado em silencio --
+    o treino continuaria convergindo, so que para outra coisa.
+    """
+    import cv2
+
+    from ai.dataset import DrivingDataset
+
+    ep = tmp_path / "ep_0000"
+    (ep / "frames").mkdir(parents=True)
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 255, (360, 640, 3), dtype=np.uint8)
+    cv2.imwrite(str(ep / "frames" / "000000.jpg"), img)
+    lid = np.full((1, 72), 6.0, dtype=np.float32)
+    np.save(str(ep / "lidar.npy"), lid)
+
+    rec = [{"image": str(ep / "frames" / "000000.jpg"), "lidar": str(ep / "lidar.npy"),
+            "row": 0, "steer": 0.25, "throttle": 0.5, "brake": 0.0}]
+
+    limpo = DrivingDataset(rec, photometric=False)[0]
+    aug = DrivingDataset(rec, photometric=True)[0]
+
+    assert not torch.allclose(limpo[0], aug[0])          # a imagem mudou
+    assert torch.allclose(limpo[1], aug[1])              # o LiDAR nao
+    assert torch.allclose(limpo[2], aug[2])              # o alvo nao
+    assert limpo[0].shape == aug[0].shape == (3, 66, 200)

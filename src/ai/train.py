@@ -131,7 +131,7 @@ def _evaluate_dual(model, loader, device):
 def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4,
                weight_decay=1e-5, dropout=0.3, val_frac=0.2, seed=0, workers=0,
                limit=0, patience=6, w_steer=1.0, w_throttle=0.5, w_brake=1.0,
-               fov_deg=None, device=None):
+               fov_deg=None, photometric=False, device=None):
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(seed)
 
@@ -153,10 +153,13 @@ def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4
                                     num_samples=len(w), replacement=True)
     # O MESMO fov_deg nos dois splits: validar com 360 um modelo treinado a 180
     # mediria uma entrada que o carro nunca vai receber.
-    train_loader = DataLoader(DrivingDataset(train_index, fov_deg=fov_deg), batch_size=batch,
+    train_loader = DataLoader(DrivingDataset(train_index, fov_deg=fov_deg,
+                                            photometric=photometric), batch_size=batch,
                               sampler=sampler, num_workers=workers, pin_memory=True, drop_last=True)
     val_loader = DataLoader(DrivingDataset(val_index, fov_deg=fov_deg), batch_size=batch,
                             shuffle=False, num_workers=workers, pin_memory=True)
+    if photometric:
+        print("aumento fotometrico LIGADO no treino (val fica limpa, para comparar)")
     if fov_deg is not None:
         print("FOV limitado a %.1f deg (traseira cega pela carroceria)" % fov_deg)
 
@@ -195,7 +198,8 @@ def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4
             torch.save({"model_state_dict": model.state_dict(), "val_loss": val_loss,
                         "mae_steer": m_s, "mae_throttle": m_t, "mae_brake": m_b,
                         "var_ratio": vr, "epoch": epoch, "arch": "DrivingNet",
-                        "fov_deg": fov_deg}, out_path)
+                        "fov_deg": fov_deg,
+                        "photometric": photometric}, out_path)
             flag = " *"
         else:
             since_best += 1
@@ -227,6 +231,9 @@ def main():
     p.add_argument("--w-steer", type=float, default=1.0)
     p.add_argument("--w-throttle", type=float, default=0.5)
     p.add_argument("--w-brake", type=float, default=1.0)
+    p.add_argument("--photometric", action="store_true",
+                   help="Aumento de brilho/contraste/gama no treino, para cobrir a "
+                        "luz da pista real (medida: metade do contraste do simulador)")
     p.add_argument("--fov-deg", type=float, default=None,
                    help="Campo de visao frontal do LiDAR em graus (ex.: 180 = traseira cega "
                         "pela carroceria). Padrao: 360 (sem mascara). Vai gravado no checkpoint.")
@@ -236,7 +243,7 @@ def main():
                    lr=a.lr, weight_decay=a.weight_decay, dropout=a.dropout, val_frac=a.val_frac,
                    seed=a.seed, workers=a.workers, limit=a.limit, patience=a.patience,
                    w_steer=a.w_steer, w_throttle=a.w_throttle, w_brake=a.w_brake,
-                   fov_deg=a.fov_deg, device=a.device)
+                   fov_deg=a.fov_deg, photometric=a.photometric, device=a.device)
         return
     train(a.data, a.out, a.epochs, a.batch, a.lr, a.weight_decay, a.dropout,
           a.val_frac, a.seed, a.workers, a.limit, a.patience, a.device)

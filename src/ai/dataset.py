@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from ai.augment import photometric_jitter
 from ai.shared.image_pipeline import preprocess
 
 
@@ -45,8 +46,12 @@ class DrivingDataset(Dataset):
     without recollecting. ``None`` = no mask (the Fase 4 behaviour).
     """
 
-    def __init__(self, index, max_range=12.0, fov_deg=None):
+    def __init__(self, index, max_range=12.0, fov_deg=None, photometric=False):
         self.index = index
+        # Aumento fotometrico: SO no split de treino. Na validacao ele tornaria
+        # o val_MAE incomparavel com as fases anteriores e mediria o aumento,
+        # nao o modelo.
+        self.photometric = photometric
         self.max_range = max_range
         self.fov_deg = fov_deg
         self._lidar_cache = {}
@@ -66,6 +71,11 @@ class DrivingDataset(Dataset):
         img_bgr = cv2.imread(rec["image"], cv2.IMREAD_COLOR)
         if img_bgr is None:
             raise FileNotFoundError(rec["image"])
+        if self.photometric:
+            # rng nova por amostra: com num_workers > 0 uma rng compartilhada
+            # faria os workers sortearem a MESMA sequencia, e o aumento perderia
+            # variedade sem dar sinal nenhum de que isso aconteceu.
+            img_bgr = photometric_jitter(img_bgr, np.random.default_rng())
         x = preprocess(img_bgr)
         sectors_m = np.asarray(self._lidar_array(rec["lidar"])[rec["row"]], dtype=np.float32)
         if self.fov_deg is not None:
