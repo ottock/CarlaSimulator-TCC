@@ -11,8 +11,17 @@ from ai.car.loop import DriveLoop
 
 
 class FakeCamera:
+    """Devolve um quadro COM TEXTURA.
+
+    Preto uniforme seria lido como lente tapada (ver sensor_health) -- e uma
+    camera real nunca entrega isso. O dublê tem de representar o caso normal.
+    """
+
     def __init__(self, frame=None):
-        self.frame = frame if frame is not None else np.zeros((720, 1280, 3), dtype=np.uint8)
+        if frame is None:
+            rng = np.random.default_rng(7)
+            frame = rng.integers(0, 255, (720, 1280, 3), dtype=np.uint8)
+        self.frame = frame
 
     def read(self):
         return self.frame
@@ -311,3 +320,41 @@ def test_without_the_offset_the_same_return_is_not_in_front():
     tele = loop.step()
     # 240 graus cai na traseira, que o FOV de 180 mascara como "livre"
     assert tele["lidar_vec"][0] == pytest.approx(0.9, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Saude dos sensores (bancada, 2026-09-12): tapar camera ou LiDAR NAO parava o
+# carro. As funcoes puras estao em test_car_sensor_health.py; aqui provamos que
+# o laco as aplica e corta a tracao.
+# ---------------------------------------------------------------------------
+
+def test_a_covered_camera_stops_the_car():
+    # Lente tapada devolve quadro, so que uniforme. Antes disso o modelo opinava
+    # sobre uma imagem preta e o carro seguia andando.
+    preto = np.zeros((720, 1280, 3), dtype=np.uint8)
+    loop, kw = _loop(camera=FakeCamera(frame=preto), cruise_us=1650)
+    loop.step()
+    tele = loop.step()
+    assert tele["blind"] is True
+    assert tele["steer"] == 0.0
+    assert kw["actuator"].servo_history[-1] == STEER_CENTER_US
+    assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US
+
+
+def test_a_lidar_that_stops_spinning_stops_the_car():
+    # O vetor antigo continua em memoria: sem verificar frescor, o carro dirige
+    # por um mapa congelado.
+    class MudoDepois(FakeLidar):
+        def read_points(self):
+            return self.batches.pop(0) if self.batches else []
+
+    clock = iter([100.0, 100.05, 100.10, 101.0]).__next__
+    loop, kw = _loop(lidar=MudoDepois(), clock=clock, cruise_us=1650)
+    loop.step()
+    loop.step()
+    loop.step()
+    assert kw["actuator"].esc_history[-1] == 1650      # ainda fresco
+    tele = loop.step()                                 # 0.9 s sem volta nova
+    assert tele["stale_lidar"] is True
+    assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US
+    assert kw["actuator"].servo_history[-1] == STEER_CENTER_US

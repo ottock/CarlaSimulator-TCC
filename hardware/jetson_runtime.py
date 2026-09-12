@@ -125,6 +125,24 @@ class CsiCamera:
         self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
         if not self.cap.isOpened():
             raise RuntimeError("nao consegui abrir a camera CSI")
+        # isOpened() NAO basta. Com a sessao Argus quebrada ele devolve True e o
+        # read() falha para sempre, em silencio: em runs/verifica2 isso rendeu
+        # 15 s e 3934 quadros com steer 0.000, sem um unico aviso no terminal.
+        if not self._probe(timeout_s=5.0):
+            self.cap.release()
+            raise RuntimeError(
+                "a camera abriu mas nao entregou quadro em 5 s. Quase sempre e o"
+                " daemon Argus preso apos uma corrida interrompida. Conserto:"
+                " sudo systemctl restart nvargus-daemon")
+
+    def _probe(self, timeout_s):
+        """Espera o primeiro quadro de verdade, para falhar cedo em vez de tarde."""
+        fim = time.time() + timeout_s
+        while time.time() < fim:
+            ok, frame = self.cap.read()
+            if ok and frame is not None:
+                return True
+        return False
 
     def read(self):
         ok, frame = self.cap.read()
@@ -326,10 +344,16 @@ def main():
             n += 1
             if time.monotonic() - t_report >= 1.0:
                 fps = n / (time.monotonic() - t_report)
+                alertas = ""
+                if tele["blocked"]:
+                    alertas += "  PARADA"
+                if tele["blind"]:
+                    alertas += "  CAMERA CEGA"
+                if tele["stale_lidar"]:
+                    alertas += "  LIDAR VELHO"
                 print("fps={0:5.1f}  steer={1:+.3f}  servo={2}us  esc={3}us{4}  scan={5}"
                       .format(fps, tele["steer"], tele["servo_us"], tele["esc_us"],
-                              "  PARADA" if tele["blocked"] else "",
-                              "ok" if tele["has_scan"] else "AGUARDANDO"))
+                              alertas, "ok" if tele["has_scan"] else "AGUARDANDO"))
                 n, t_report = 0, time.monotonic()
     except KeyboardInterrupt:
         print("\ninterrompido")

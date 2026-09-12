@@ -20,6 +20,7 @@ from ai.car.control_map import (ESC_NEUTRAL_US, STEER_CENTER_US, FrameWatchdog,
 from ai.car.image_crop import prepare_frame
 from ai.car.lidar_frame import drop_self_occlusion, rotate_angles
 from ai.car.scan_assembly import ScanAssembler
+from ai.car.sensor_health import StaleTracker, frame_is_blind
 from ai.shared.image_pipeline import preprocess
 from ai.shared.lidar_pipeline import apply_fov_mask, normalize_sectors_m, scan_to_sectors_m
 
@@ -30,7 +31,8 @@ class DriveLoop:
     def __init__(self, camera, lidar, engine, actuator, logger, fov_deg, max_range,
                  crop_frac, n_sectors=72, clock=None, watchdog=None,
                  cruise_us=ESC_NEUTRAL_US, stop_dist_m=0.25,
-                 lidar_offset_deg=0.0, lidar_invert=False, self_occlusion=()):
+                 lidar_offset_deg=0.0, lidar_invert=False, self_occlusion=(),
+                 lidar_timeout_s=0.5):
         self.camera = camera
         self.lidar = lidar
         self.engine = engine
@@ -50,6 +52,9 @@ class DriveLoop:
         self.lidar_offset_deg = lidar_offset_deg
         self.lidar_invert = lidar_invert
         self.self_occlusion = list(self_occlusion)
+        # Frescor do LiDAR: distinto do watchdog, que mede quanto o LACO demorou.
+        # Um laco rapido pode estar rodando sobre um mapa congelado ha minutos.
+        self.lidar_fresh = StaleTracker(lidar_timeout_s)
         self.clock = clock or time.monotonic
         self.watchdog = watchdog or FrameWatchdog()
         self.assembler = ScanAssembler()
@@ -77,14 +82,21 @@ class DriveLoop:
 
         for scan in self.assembler.feed(self.lidar.read_points()):
             self._last_vec = self._sectors_from_scan(scan)
+            self.lidar_fresh.mark(now)
             self.logger.log_scan(t=now, points=scan)
 
         frame = self.camera.read()
         control = (0.0, 0.0, 0.0)
         # Sem uma volta completa o vetor teria buracos que a rede leria como "livre";
-        # sem imagem nao ha o que inferir; um frame estourado significa laco travado.
-        # Nos tres casos o comando seguro e o mesmo: servo ao centro.
-        can_drive = (self._last_vec is not None) and (frame is not None) and (not stalled)
+        # um frame estourado significa laco travado. Alem disso, a bancada mostrou
+        # que as falhas reais NAO se apresentam como ausencia de sensor: a camera
+        # tapada segue entregando quadros (so que sem informacao) e o LiDAR parado
+        # deixa o ultimo vetor congelado. Em todos os casos o comando seguro e o
+        # mesmo: servo ao centro e ESC a zero.
+        blind = frame_is_blind(frame)
+        stale_lidar = self.lidar_fresh.is_stale(now)
+        can_drive = ((self._last_vec is not None) and (not blind)
+                     and (not stalled) and (not stale_lidar))
         if can_drive:
             img = preprocess(prepare_frame(frame, self.crop_frac))
             control = self.engine.infer(img, self._last_vec)
@@ -110,6 +122,7 @@ class DriveLoop:
             esc_us=esc_us, blocked=blocked)
         return {"t": now, "steer": control[0], "throttle": control[1],
                 "brake": control[2], "servo_us": servo_us, "esc_us": esc_us,
-                "blocked": blocked, "dt": dt,
+                "blocked": blocked, "blind": blind, "stale_lidar": stale_lidar,
+                "dt": dt,
                 "stalled": stalled, "has_scan": self._last_vec is not None,
                 "lidar_vec": vec}
