@@ -14,12 +14,18 @@ STEER_SPAN_US = 200
 ESC_NEUTRAL_US = 1500
 
 
-def steer_to_us(steer):
-    """Map ``steer`` in [-1, 1] to servo microseconds, clamped to the mechanical stops.
+def steer_to_us(steer, span_us=STEER_SPAN_US):
+    """Map ``steer`` in [-1, 1] to servo microseconds, clamped to the stops.
 
-    CARLA's convention (+1 = right) matches the car's (1700 us = right).
+    CARLA's convention (+1 = right) matches the car's (higher us = right).
     Anything unusable -- ``None``, NaN, a non-number -- returns centre, which is
     the safe command. Infinity is clamped to the nearest extreme.
+
+    ``span_us`` is the half-range that ``steer = 1`` must reach, and it has to be
+    the servo's REAL mechanical limit: the model learned ``+/-1`` meaning full
+    lock, so a span narrower than the car's actual lock scales down every single
+    steering command and the car understeers everywhere. Measure it with
+    ``hardware/controle_pwm_steering.py``, wheels off the ground.
     """
     try:
         s = float(steer)
@@ -30,8 +36,8 @@ def steer_to_us(steer):
     # Clamp s to [-1, 1] before rounding to handle infinity safely while
     # preserving intent: +inf means "hard right", -inf means "hard left".
     s = max(-1.0, min(1.0, s))
-    us = int(round(STEER_CENTER_US + s * STEER_SPAN_US))
-    return max(STEER_LEFT_US, min(STEER_RIGHT_US, us))
+    us = int(round(STEER_CENTER_US + s * span_us))
+    return max(STEER_CENTER_US - span_us, min(STEER_CENTER_US + span_us, us))
 
 
 class FrameWatchdog:

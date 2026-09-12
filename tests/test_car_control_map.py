@@ -152,3 +152,28 @@ def test_front_blocked_ignores_the_same_obstacle_behind():
 
 def test_front_blocked_is_false_on_a_clear_road():
     assert front_blocked(np.ones(72, dtype=np.float32), threshold=0.25) is False
+
+
+# ---------------------------------------------------------------------------
+# Faixa do servo ajustavel (2026-09-12)
+#
+# Os 1300/1700 vieram do controle por teclado, escolha conservadora e nao o
+# batente mecanico -- o proprio controle_pwm_steering.py varre 1100-1900. Como o
+# modelo aprendeu steer=+/-1 significando BATENTE TOTAL, mapear +/-1 para uma
+# faixa menor que a real corta todo comando de esterco proporcionalmente, e o
+# carro subvira em tudo.
+# ---------------------------------------------------------------------------
+
+def test_a_wider_span_turns_more_for_the_same_command():
+    assert steer_to_us(-0.4) == 1420                      # padrao +/-200
+    assert steer_to_us(-0.4, span_us=400) == 1340         # +/-400: quase o dobro
+
+
+def test_the_clamp_follows_the_span():
+    assert steer_to_us(-5.0, span_us=400) == 1100
+    assert steer_to_us(+5.0, span_us=400) == 1900
+
+
+def test_garbage_still_centres_whatever_the_span():
+    assert steer_to_us(float("nan"), span_us=400) == STEER_CENTER_US
+    assert steer_to_us(None, span_us=400) == STEER_CENTER_US

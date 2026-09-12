@@ -32,7 +32,7 @@ class DriveLoop:
                  crop_frac, n_sectors=72, clock=None, watchdog=None,
                  cruise_us=ESC_NEUTRAL_US, stop_dist_m=0.25,
                  lidar_offset_deg=0.0, lidar_invert=False, self_occlusion=(),
-                 lidar_timeout_s=0.5):
+                 lidar_timeout_s=0.5, steer_span_us=None):
         self.camera = camera
         self.lidar = lidar
         self.engine = engine
@@ -55,6 +55,7 @@ class DriveLoop:
         # Frescor do LiDAR: distinto do watchdog, que mede quanto o LACO demorou.
         # Um laco rapido pode estar rodando sobre um mapa congelado ha minutos.
         self.lidar_fresh = StaleTracker(lidar_timeout_s)
+        self.steer_span_us = steer_span_us
         self.clock = clock or time.monotonic
         self.watchdog = watchdog or FrameWatchdog()
         self.assembler = ScanAssembler()
@@ -100,7 +101,10 @@ class DriveLoop:
         if can_drive:
             img = preprocess(prepare_frame(frame, self.crop_frac))
             control = self.engine.infer(img, self._last_vec)
-        servo_us = steer_to_us(control[0]) if can_drive else STEER_CENTER_US
+            servo_us = (steer_to_us(control[0]) if self.steer_span_us is None
+                        else steer_to_us(control[0], span_us=self.steer_span_us))
+        else:
+            servo_us = STEER_CENTER_US
 
         # Velocidade constante enquanto tudo esta saudavel; ZERO em qualquer
         # condicao degradada -- sem volta completa do LiDAR, sem imagem, laco

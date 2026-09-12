@@ -272,6 +272,12 @@ def main():
                    help="PWM CONSTANTE do ESC. %d = parado (padrao); o ESC so move a "
                         "partir de %d; maximo %d. Exige ESC_ARMADO=True no arquivo."
                         % (ESC_NEUTRAL_US, ESC_MIN_MOVE_US, ESC_MAX_US))
+    p.add_argument("--steer-span-us", type=int, default=None,
+                   help="Meia-faixa do servo que steer=1 deve atingir, em us. "
+                        "Padrao 200 (1300-1700), que veio do controle por teclado e "
+                        "e CONSERVADOR. Se o batente real for maior, todo comando de "
+                        "esterco sai reduzido e o carro subvira. Meca com "
+                        "hardware/controle_pwm_steering.py, rodas no ar.")
     p.add_argument("--stop-dist", type=float, default=0.25,
                    help="Parada de emergencia: metros no cone frontal (padrao 0.25)")
     p.add_argument("--lidar-offset-deg", type=float, default=LIDAR_OFFSET_DEG,
@@ -325,6 +331,7 @@ def main():
         "cruise_us": a.cruise_us, "stop_dist_m": a.stop_dist,
         "flip_method": a.flip_method,
         "lidar_offset_deg": a.lidar_offset_deg, "lidar_invert": a.lidar_invert,
+        "steer_span_us": a.steer_span_us,
         "self_occlusion": a.self_occlusion,
         "engine": os.path.basename(a.engine),
     }, jpeg_every=a.jpeg_every)
@@ -334,7 +341,8 @@ def main():
                      crop_frac=a.crop_frac, n_sectors=cfg["n_sectors"],
                      cruise_us=a.cruise_us, stop_dist_m=a.stop_dist,
                      lidar_offset_deg=a.lidar_offset_deg,
-                     lidar_invert=a.lidar_invert, self_occlusion=arcos)
+                     lidar_invert=a.lidar_invert, self_occlusion=arcos,
+                     steer_span_us=a.steer_span_us)
 
     t_end = time.monotonic() + a.seconds
     n, t_report = 0, time.monotonic()
