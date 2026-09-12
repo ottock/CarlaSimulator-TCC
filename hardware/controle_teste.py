@@ -88,8 +88,12 @@ ESC_CHANNEL   = 12
 
 # --- Limites do servo (us) ---
 STEER_CENTER_US = 1500
-STEER_LEFT_US   = 1300
-STEER_RIGHT_US  = 1700
+# Batente MEDIDO com hardware/calibra_servo.py em 2026-09-12 (+/-300 us). Os
+# 1300/1700 anteriores eram conservadores e nunca medidos. Mantidos iguais aos
+# do control_map.py de proposito: se o controle manual e o do modelo tiverem
+# esterco diferente, comparar os dois deixa de fazer sentido.
+STEER_LEFT_US   = 1200
+STEER_RIGHT_US  = 1800
 
 # --- Limites do ESC (us) - faixa de bancada calibrada (ver MASTER) ---
 THROTTLE_NEUTRO_US = 1500

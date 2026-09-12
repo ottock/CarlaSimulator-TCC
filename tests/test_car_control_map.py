@@ -21,15 +21,15 @@ def test_zero_steer_is_centre():
 
 def test_full_right_matches_carla_convention():
     # CARLA: steer +1 = direita. O MASTER do hardware: 1700 us = direita.
-    assert steer_to_us(1.0) == STEER_RIGHT_US == 1700
+    assert steer_to_us(1.0) == STEER_RIGHT_US == 1800
 
 
 def test_full_left():
-    assert steer_to_us(-1.0) == STEER_LEFT_US == 1300
+    assert steer_to_us(-1.0) == STEER_LEFT_US == 1200
 
 
 def test_half_right_is_linear():
-    assert steer_to_us(0.5) == 1600
+    assert steer_to_us(0.5) == 1650
 
 
 def test_out_of_range_is_clamped_not_wrapped():
@@ -157,16 +157,15 @@ def test_front_blocked_is_false_on_a_clear_road():
 # ---------------------------------------------------------------------------
 # Faixa do servo ajustavel (2026-09-12)
 #
-# Os 1300/1700 vieram do controle por teclado, escolha conservadora e nao o
-# batente mecanico -- o proprio controle_pwm_steering.py varre 1100-1900. Como o
-# modelo aprendeu steer=+/-1 significando BATENTE TOTAL, mapear +/-1 para uma
-# faixa menor que a real corta todo comando de esterco proporcionalmente, e o
-# carro subvira em tudo.
+# Os 1300/1700 vieram do controle por teclado e eram conservadores. Medido no
+# carro (calibra_servo.py, 2026-09-12): o batente real e +/-300 us. Como o modelo
+# aprendeu steer=+/-1 significando BATENTE TOTAL, mapear +/-1 para uma faixa
+# menor que a real corta todo comando de esterco proporcionalmente.
 # ---------------------------------------------------------------------------
 
 def test_a_wider_span_turns_more_for_the_same_command():
-    assert steer_to_us(-0.4) == 1420                      # padrao +/-200
-    assert steer_to_us(-0.4, span_us=400) == 1340         # +/-400: quase o dobro
+    assert steer_to_us(-0.4) == 1380                      # padrao +/-300 (medido)
+    assert steer_to_us(-0.4, span_us=200) == 1420         # o valor antigo, menor
 
 
 def test_the_clamp_follows_the_span():

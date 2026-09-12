@@ -111,7 +111,7 @@ def test_servo_follows_the_model_once_a_revolution_arrives():
     tele = loop.step()                            # o 2o wrap fecha e roda o modelo
     assert tele["has_scan"] is True
     assert tele["steer"] == pytest.approx(0.5)
-    assert kw["actuator"].servo_history[-1] == 1600
+    assert kw["actuator"].servo_history[-1] == 1650
 
 
 def test_esc_is_neutral_by_default():
@@ -132,7 +132,7 @@ def test_a_stalled_frame_centres_the_servo():
     loop, kw = _loop(clock=clock, engine=FakeEngine(out=(0.5, 0.4, 0.0)))
     loop.step()
     loop.step()
-    assert kw["actuator"].servo_history[-1] == 1600      # seguindo o modelo
+    assert kw["actuator"].servo_history[-1] == 1650      # seguindo o modelo
     tele = loop.step()                                    # gap 0.55 s > 0.25
     assert tele["stalled"] is True
     assert kw["actuator"].servo_history[-1] == STEER_CENTER_US
