@@ -98,6 +98,7 @@ class DriveLoop:
         stale_lidar = self.lidar_fresh.is_stale(now)
         can_drive = ((self._last_vec is not None) and (not blind)
                      and (not stalled) and (not stale_lidar))
+        img = None
         if can_drive:
             img = preprocess(prepare_frame(frame, self.crop_frac))
             control = self.engine.infer(img, self._last_vec)
@@ -123,7 +124,9 @@ class DriveLoop:
             t=now,
             sectors=vec if vec is not None else np.ones(self.n_sectors, dtype=np.float32),
             control=control, servo_us=servo_us, dt=dt, frame_bgr=frame,
-            esc_us=esc_us, blocked=blocked)
+            esc_us=esc_us, blocked=blocked,
+            model_input=(None if img is None else
+                         ((img.transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8)))
         return {"t": now, "steer": control[0], "throttle": control[1],
                 "brake": control[2], "servo_us": servo_us, "esc_us": esc_us,
                 "blocked": blocked, "blind": blind, "stale_lidar": stale_lidar,

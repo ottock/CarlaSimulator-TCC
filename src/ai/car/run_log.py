@@ -24,10 +24,16 @@ N_SECTORS = 72
 class RunLogger:
     """One directory per run; ``close()`` flushes the sector matrix."""
 
-    def __init__(self, out_dir, meta, jpeg_every=10, n_sectors=N_SECTORS):
+    def __init__(self, out_dir, meta, jpeg_every=10, n_sectors=N_SECTORS,
+                 log_inputs=False):
         self.out_dir = out_dir
         self.jpeg_every = jpeg_every
         self.n_sectors = n_sectors
+        # Guarda a imagem JA preprocessada -- o que a rede de fato viu. O JPEG do
+        # log e cru (antes do recorte), entao serve para calibrar o crop, mas nao
+        # para re-executar o modelo. Custa ~40 KB por quadro.
+        self.log_inputs = log_inputs
+        self._inputs = []
         self._sectors = []
         self._frame_i = 0
         self._closed = False
@@ -54,7 +60,7 @@ class RunLogger:
             raise
 
     def log_frame(self, t, sectors, control, servo_us, dt, frame_bgr=None,
-                  esc_us=ESC_NEUTRAL_US, blocked=False):
+                  esc_us=ESC_NEUTRAL_US, blocked=False, model_input=None):
         """Record one control cycle. ``control`` is ``(steer, throttle, brake)``.
 
         ``esc_us`` and ``blocked`` matter from the moment the car actually drives:
@@ -68,6 +74,12 @@ class RunLogger:
                "esc_us": int(esc_us), "blocked": bool(blocked), "dt": float(dt)}
         self._frames_fh.write(json.dumps(row) + "\n")
         self._sectors.append(np.asarray(sectors, dtype=np.float32))
+        if self.log_inputs:
+            # Zeros quando o modelo nao rodou, para a linha continuar casando
+            # com frames.jsonl -- pular deslocaria todos os indices seguintes.
+            self._inputs.append(np.zeros((66, 200, 3), dtype=np.uint8)
+                                if model_input is None
+                                else np.asarray(model_input, dtype=np.uint8))
         if frame_bgr is not None and self._frame_i % self.jpeg_every == 0:
             cv2.imwrite(os.path.join(self.out_dir, "frames",
                                      "%06d.jpg" % self._frame_i), frame_bgr)
@@ -91,3 +103,7 @@ class RunLogger:
         else:
             arr = np.zeros((0, self.n_sectors), dtype=np.float32)
         np.save(os.path.join(self.out_dir, "sectors.npy"), arr)
+        if self.log_inputs:
+            imgs = (np.stack(self._inputs) if self._inputs
+                    else np.zeros((0, 66, 200, 3), dtype=np.uint8))
+            np.save(os.path.join(self.out_dir, "model_input.npy"), imgs)

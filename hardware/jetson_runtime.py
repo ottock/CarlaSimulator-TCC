@@ -268,6 +268,10 @@ def main():
                         "0.48 e um CHUTE a calibrar; 1.0 desliga o recorte.")
     p.add_argument("--scale", type=float, default=12.0, help="Escala do modelo (1:12)")
     p.add_argument("--jpeg-every", type=int, default=10)
+    p.add_argument("--log-inputs", action="store_true",
+                   help="Grava model_input.npy com a imagem JA preprocessada de cada "
+                        "quadro (~40 KB/quadro). E o que permite re-executar o modelo "
+                        "no PC e atribuir o esterco a camera ou ao LiDAR.")
     p.add_argument("--cruise-us", type=int, default=ESC_NEUTRAL_US,
                    help="PWM CONSTANTE do ESC. %d = parado (padrao); o ESC so move a "
                         "partir de %d; maximo %d. Exige ESC_ARMADO=True no arquivo."
@@ -331,10 +335,10 @@ def main():
         "cruise_us": a.cruise_us, "stop_dist_m": a.stop_dist,
         "flip_method": a.flip_method,
         "lidar_offset_deg": a.lidar_offset_deg, "lidar_invert": a.lidar_invert,
-        "steer_span_us": a.steer_span_us,
+        "steer_span_us": a.steer_span_us, "log_inputs": a.log_inputs,
         "self_occlusion": a.self_occlusion,
         "engine": os.path.basename(a.engine),
-    }, jpeg_every=a.jpeg_every)
+    }, jpeg_every=a.jpeg_every, log_inputs=a.log_inputs)
 
     loop = DriveLoop(camera=camera, lidar=lidar, engine=engine, actuator=actuator,
                      logger=logger, fov_deg=cfg["fov_deg"], max_range=max_range,

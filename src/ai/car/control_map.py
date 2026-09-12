@@ -10,15 +10,17 @@ Numbers come from ``hardware/controle_teste.py``, already validated on the car.
 STEER_CENTER_US = 1500
 # Batente MEDIDO no carro em 2026-09-12 com hardware/calibra_servo.py, passo a
 # passo ate a roda parar de responder: delta maximo 300 us para cada lado.
+# USAMOS 260, com 40 us de folga do batente: comandar exatamente no limite
+# mecanico faz o servo forcar e aquecer quando o modelo pede esterco total.
 # Antes eram 200, herdados do controle por teclado do controle_teste.py --
 # conservadores e nunca medidos. Com 200, steer=1 entregava dois tercos do curso
 # real, entao TODO comando de esterco saia reduzido em 33% e o carro subvirava em
 # tudo, saturando ou nao. O modelo aprendeu steer=+/-1 significando BATENTE
 # TOTAL, entao este numero tem de ser o batente fisico -- nao e ajuste fino.
 # RE-MEDIR se a geometria da direcao mudar.
-STEER_LEFT_US = 1200
-STEER_RIGHT_US = 1800
-STEER_SPAN_US = 300
+STEER_LEFT_US = 1240
+STEER_RIGHT_US = 1760
+STEER_SPAN_US = 260
 ESC_NEUTRAL_US = 1500
 
 

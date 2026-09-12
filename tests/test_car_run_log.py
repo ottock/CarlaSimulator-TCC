@@ -179,3 +179,38 @@ def test_esc_defaults_keep_older_callers_working(tmp_path):
         row = json.loads(fh.readline())
     assert row["esc_us"] == 1500
     assert row["blocked"] is False
+
+
+def test_the_exact_model_input_is_recorded(tmp_path):
+    """Sem isso nao da para separar camera de LiDAR depois.
+
+    O log guardava o vetor do LiDAR (sectors.npy) e um JPEG a cada N quadros --
+    o JPEG e' CRU, antes do recorte, entao nao e' o que a rede viu. Guardando a
+    imagem JA preprocessada da para RE-EXECUTAR o modelo no PC sobre a corrida
+    real e perguntar: se eu neutralizar o LiDAR, o esterco muda? E se eu
+    neutralizar a camera? Isso atribui a decisao a um sensor, em vez de inferir.
+    """
+    lg = RunLogger(str(tmp_path / "r"), meta={}, jpeg_every=100, log_inputs=True)
+    entrada = np.full((66, 200, 3), 7, dtype=np.uint8)
+    lg.log_frame(t=0.0, sectors=np.ones(72, dtype=np.float32),
+                 control=(0.1, 0.0, 0.0), servo_us=1500, dt=0.05,
+                 model_input=entrada)
+    lg.log_frame(t=1.0, sectors=np.ones(72, dtype=np.float32),
+                 control=(0.0, 0.0, 0.0), servo_us=1500, dt=0.05,
+                 model_input=None)          # quadro em que o modelo nao rodou
+    lg.close()
+
+    arr = np.load(os.path.join(str(tmp_path / "r"), "model_input.npy"))
+    assert arr.shape == (2, 66, 200, 3)
+    assert arr.dtype == np.uint8
+    assert (arr[0] == 7).all()
+    # sem inferencia grava zeros, mantendo o alinhamento com frames.jsonl
+    assert (arr[1] == 0).all()
+
+
+def test_model_input_is_not_written_when_disabled(tmp_path):
+    lg = RunLogger(str(tmp_path / "r2"), meta={}, jpeg_every=100)
+    lg.log_frame(t=0.0, sectors=np.ones(72, dtype=np.float32),
+                 control=(0.0, 0.0, 0.0), servo_us=1500, dt=0.05)
+    lg.close()
+    assert not os.path.exists(os.path.join(str(tmp_path / "r2"), "model_input.npy"))
