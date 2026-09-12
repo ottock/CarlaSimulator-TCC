@@ -18,6 +18,7 @@ import numpy as np
 from ai.car.control_map import (ESC_NEUTRAL_US, STEER_CENTER_US, FrameWatchdog,
                                clamp_cruise_us, front_blocked, steer_to_us)
 from ai.car.image_crop import prepare_frame
+from ai.car.lidar_frame import drop_self_occlusion, rotate_angles
 from ai.car.scan_assembly import ScanAssembler
 from ai.shared.image_pipeline import preprocess
 from ai.shared.lidar_pipeline import apply_fov_mask, normalize_sectors_m, scan_to_sectors_m
@@ -28,7 +29,8 @@ class DriveLoop:
 
     def __init__(self, camera, lidar, engine, actuator, logger, fov_deg, max_range,
                  crop_frac, n_sectors=72, clock=None, watchdog=None,
-                 cruise_us=ESC_NEUTRAL_US, stop_dist_m=0.25):
+                 cruise_us=ESC_NEUTRAL_US, stop_dist_m=0.25,
+                 lidar_offset_deg=0.0, lidar_invert=False, self_occlusion=()):
         self.camera = camera
         self.lidar = lidar
         self.engine = engine
@@ -42,6 +44,12 @@ class DriveLoop:
         # ser um ato deliberado de quem chama, nunca o comportamento padrao.
         self.cruise_us = cruise_us
         self.stop_dist_m = stop_dist_m
+        # Frame do LiDAR. O offset e o angulo do SENSOR que aponta para a frente
+        # do carro; self_occlusion sao os arcos tapados pela propria carroceria,
+        # medidos no frame do sensor (fixos ate o LiDAR ser remontado).
+        self.lidar_offset_deg = lidar_offset_deg
+        self.lidar_invert = lidar_invert
+        self.self_occlusion = list(self_occlusion)
         self.clock = clock or time.monotonic
         self.watchdog = watchdog or FrameWatchdog()
         self.assembler = ScanAssembler()
@@ -51,6 +59,10 @@ class DriveLoop:
     def _sectors_from_scan(self, scan):
         angles = [a for a, _ in scan]
         dists = [d for _, d in scan]
+        # Ordem importa: a auto-oclusao e medida no frame do SENSOR, entao tem de
+        # ser descartada ANTES de girar para o frame do carro.
+        angles, dists = drop_self_occlusion(angles, dists, self.self_occlusion)
+        angles = rotate_angles(angles, self.lidar_offset_deg, self.lidar_invert)
         sectors_m = scan_to_sectors_m(angles, dists, n_sectors=self.n_sectors,
                                       max_range=self.max_range)
         sectors_m = apply_fov_mask(sectors_m, self.fov_deg, self.max_range)

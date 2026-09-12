@@ -257,3 +257,57 @@ def test_cruise_is_zero_on_a_stalled_frame():
     tele = loop.step()
     assert tele["stalled"] is True
     assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US
+
+
+# ---------------------------------------------------------------------------
+# Frame do LiDAR: auto-oclusao e alinhamento (medidos no carro em 2026-09-12)
+#
+# As funcoes puras ja estao cobertas em test_car_lidar_frame.py. Estes testes
+# provam a FIACAO: que o laco de fato as aplica antes de montar o vetor. Sem
+# eles, um refactor poderia deixar as correcoes configuradas e nao usadas.
+# ---------------------------------------------------------------------------
+
+class OneBlipLidar(FakeLidar):
+    """Volta completa a 0.9 m, com um unico retorno perto num angulo conhecido."""
+
+    def __init__(self, blip_deg, dist=0.2):
+        FakeLidar.__init__(self)
+
+        def d(a):
+            desvio = abs(((a - blip_deg + 180.0) % 360.0) - 180.0)
+            return dist if desvio < 2.0 else 0.9
+
+        frag = [(float(a), d(a)) for a in range(300, 360, 2)]
+        rev = [(float(a), d(a)) for a in range(0, 360, 2)]
+        self.batches = [frag + rev, list(rev), list(rev)]
+
+
+def test_self_occluded_sectors_read_free_instead_of_a_wall():
+    # A carroceria lia 0.25 m fixo em um terco do circulo. Mascarada, esses
+    # setores tem de virar "livre" (1.0) -- o mesmo tratamento que o treino deu
+    # aos setores fora do FOV.
+    loop, kw = _loop(self_occlusion=[(0.0, 10.0)])
+    loop.step()
+    tele = loop.step()
+    vec = tele["lidar_vec"]
+    assert vec[0] == pytest.approx(1.0)      # setor 0 = 0-5 graus, ocluido
+    assert vec[1] == pytest.approx(1.0)      # setor 1 = 5-10 graus, ocluido
+    assert vec[2] == pytest.approx(0.5)      # 10-15 graus segue enxergando
+
+
+def test_the_offset_moves_a_return_into_the_front_sector():
+    # Objeto a 240 graus no sensor + offset 240 => ele passa a estar na FRENTE.
+    loop, kw = _loop(lidar=OneBlipLidar(240.0), lidar_offset_deg=240.0)
+    loop.step()
+    tele = loop.step()
+    vec = tele["lidar_vec"]
+    assert vec[0] == pytest.approx(0.2, abs=1e-6)
+    assert vec.argmin() == 0
+
+
+def test_without_the_offset_the_same_return_is_not_in_front():
+    loop, kw = _loop(lidar=OneBlipLidar(240.0))
+    loop.step()
+    tele = loop.step()
+    # 240 graus cai na traseira, que o FOV de 180 mascara como "livre"
+    assert tele["lidar_vec"][0] == pytest.approx(0.9, abs=1e-6)

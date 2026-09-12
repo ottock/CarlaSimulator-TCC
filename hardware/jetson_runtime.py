@@ -47,6 +47,7 @@ import Adafruit_PCA9685
 from ai.car.coin_d6 import CoinD6Parser
 from ai.car.config import car_max_range, load_model_config
 from ai.car.control_map import ESC_MAX_US, ESC_MIN_MOVE_US, ESC_NEUTRAL_US, STEER_CENTER_US
+from ai.car.lidar_frame import parse_arcs
 from ai.car.loop import DriveLoop
 from ai.car.run_log import RunLogger
 
@@ -72,6 +73,19 @@ ESC_CHANNEL = 12
 BAUD_RATE = 230400
 CMD_START = bytes([0xAA, 0x55, 0xF0, 0x0F])
 CMD_STOP = bytes([0xAA, 0x55, 0xF5, 0x0A])
+
+# Arcos que a PROPRIA CARROCERIA tapa, no frame do sensor. Medidos no log de
+# 2026-09-12 (carro parado em area aberta): 0-120 graus lendo 0.20-0.32 m com
+# spread <= 0.04 (perto E constante = preso ao carro), mais um ponto encostado
+# em ~212 graus. Sem isso a rede ve uma parede permanente a 25 cm em um terco do
+# circulo -- entrada que ela nunca viu no treino.
+# RE-MEDIR se o LiDAR for remontado: um arco errado cega uma regiao real.
+SELF_OCCLUSION_ARCS = "0:120,210:215"
+
+# Angulo do SENSOR que aponta para a FRENTE do carro. 0.0 = ainda nao calibrado.
+# Enquanto for 0 sem ter sido medido, a janela de 180 graus do modelo pode estar
+# olhando para o lado errado. Calibre com um objeto a frente (ver docs).
+LIDAR_OFFSET_DEG = 0.0
 
 CAP_WIDTH, CAP_HEIGHT, CAP_FPS = 1280, 720, 60
 # Rotacao da imagem (nvvidconv flip-method): 0 = sem giro, 2 = 180 graus.
@@ -229,16 +243,30 @@ def main():
                         % (ESC_NEUTRAL_US, ESC_MIN_MOVE_US, ESC_MAX_US))
     p.add_argument("--stop-dist", type=float, default=0.25,
                    help="Parada de emergencia: metros no cone frontal (padrao 0.25)")
+    p.add_argument("--lidar-offset-deg", type=float, default=LIDAR_OFFSET_DEG,
+                   help="Angulo do sensor que aponta para a FRENTE do carro. "
+                        "Calibre com um objeto a frente; 0 = sem correcao.")
+    p.add_argument("--lidar-invert", action="store_true",
+                   help="Sensor girando ao contrario do simulador (espelha esq/dir)")
+    p.add_argument("--self-occlusion", default=SELF_OCCLUSION_ARCS,
+                   help="Arcos tapados pela carroceria, no frame do sensor: "
+                        "'0:120,210:215'. Vazio desliga a mascara.")
     p.add_argument("--flip-method", type=int, default=FLIP_METHOD,
                    help="Rotacao da camera: 0 = sem giro (padrao), 2 = 180 graus. "
                         "Imagem invertida e entrada fora da distribuicao de treino.")
     a = p.parse_args()
 
+    arcos = parse_arcs(a.self_occlusion)   # erra alto se o formato estiver errado
     cfg = load_model_config(a.config)
     max_range = car_max_range(cfg, scale=a.scale)
     print("modelo: fov={0} deg  n_sectors={1}  max_range no carro={2:.3f} m"
           .format(cfg["fov_deg"], cfg["n_sectors"], max_range))
     anda = ESC_ARMADO and a.cruise_us >= ESC_MIN_MOVE_US
+    print("LiDAR: offset={0:.1f} deg  invert={1}  auto-oclusao={2}"
+          .format(a.lidar_offset_deg, a.lidar_invert, arcos or "nenhuma"))
+    if a.lidar_offset_deg == 0.0:
+        print("AVISO: offset 0 -- se o zero do sensor nao aponta para a frente do")
+        print("       carro, a janela de 180 graus do modelo olha para o lado errado.")
     print("ESC ARMADO: {0}   cruise={1}us   parada de emergencia: {2:.2f} m"
           .format(ESC_ARMADO, a.cruise_us, a.stop_dist))
     if not ESC_ARMADO:
@@ -261,13 +289,17 @@ def main():
         "crop_frac": a.crop_frac, "esc_armado": ESC_ARMADO,
         "cruise_us": a.cruise_us, "stop_dist_m": a.stop_dist,
         "flip_method": a.flip_method,
+        "lidar_offset_deg": a.lidar_offset_deg, "lidar_invert": a.lidar_invert,
+        "self_occlusion": a.self_occlusion,
         "engine": os.path.basename(a.engine),
     }, jpeg_every=a.jpeg_every)
 
     loop = DriveLoop(camera=camera, lidar=lidar, engine=engine, actuator=actuator,
                      logger=logger, fov_deg=cfg["fov_deg"], max_range=max_range,
                      crop_frac=a.crop_frac, n_sectors=cfg["n_sectors"],
-                     cruise_us=a.cruise_us, stop_dist_m=a.stop_dist)
+                     cruise_us=a.cruise_us, stop_dist_m=a.stop_dist,
+                     lidar_offset_deg=a.lidar_offset_deg,
+                     lidar_invert=a.lidar_invert, self_occlusion=arcos)
 
     t_end = time.monotonic() + a.seconds
     n, t_report = 0, time.monotonic()
