@@ -20,16 +20,17 @@ def test_zero_steer_is_centre():
 
 
 def test_full_right_matches_carla_convention():
-    # CARLA: steer +1 = direita. O MASTER do hardware: 1700 us = direita.
-    assert steer_to_us(1.0) == STEER_RIGHT_US == 1760
+    # CARLA: steer +1 = direita. NESTE carro o servo e espelhado (STEER_SIGN),
+    # entao a direita sai em 1240 us -- medido, nao deduzido.
+    assert steer_to_us(1.0) == STEER_RIGHT_US == 1240
 
 
 def test_full_left():
-    assert steer_to_us(-1.0) == STEER_LEFT_US == 1240
+    assert steer_to_us(-1.0) == STEER_LEFT_US == 1760
 
 
 def test_half_right_is_linear():
-    assert steer_to_us(0.5) == 1630
+    assert steer_to_us(0.5) == 1370
 
 
 def test_out_of_range_is_clamped_not_wrapped():
@@ -164,15 +165,44 @@ def test_front_blocked_is_false_on_a_clear_road():
 # ---------------------------------------------------------------------------
 
 def test_a_wider_span_turns_more_for_the_same_command():
-    assert steer_to_us(-0.4) == 1396                      # padrao +/-260 (medido 300, folga 40)
-    assert steer_to_us(-0.4, span_us=200) == 1420         # o valor antigo, menor
+    assert steer_to_us(-0.4) == 1604                      # padrao +/-260, espelhado
+    assert steer_to_us(-0.4, span_us=200) == 1580         # o valor antigo, menor
 
 
 def test_the_clamp_follows_the_span():
-    assert steer_to_us(-5.0, span_us=400) == 1100
-    assert steer_to_us(+5.0, span_us=400) == 1900
+    assert steer_to_us(-5.0, span_us=400) == 1900
+    assert steer_to_us(+5.0, span_us=400) == 1100
 
 
 def test_garbage_still_centres_whatever_the_span():
     assert steer_to_us(float("nan"), span_us=400) == STEER_CENTER_US
     assert steer_to_us(None, span_us=400) == STEER_CENTER_US
+
+
+# ---------------------------------------------------------------------------
+# Sinal do esterco (MEDIDO no carro em 2026-09-12 com hardware/teste_esquerda.py)
+#
+# Comandando steer = -1 (ESQUERDA na convencao do CARLA) as rodas foram para a
+# DIREITA. O servo deste carro responde espelhado. Como o espelho fica DEPOIS do
+# modelo, a rede pedia uma coisa e o carro fazia a oposta -- em todas as corridas
+# de pista ate aqui.
+# ---------------------------------------------------------------------------
+
+def test_negative_steer_turns_the_wheels_left_on_this_car():
+    # 1760 us e o valor que fisicamente vira a esquerda NESTE carro
+    assert steer_to_us(-1.0) == STEER_LEFT_US == 1760
+
+
+def test_positive_steer_turns_the_wheels_right_on_this_car():
+    assert steer_to_us(+1.0) == STEER_RIGHT_US == 1240
+
+
+def test_the_mirror_is_a_single_documented_constant():
+    """O espelho tem de ser explicito, nao um sinal trocado escondido na conta.
+
+    Se o servo for remontado, muda-se STEER_SIGN e pronto; um sinal enterrado no
+    meio da expressao seria achado meses depois, por alguem refazendo este mesmo
+    teste no carro.
+    """
+    from ai.car.control_map import STEER_SIGN
+    assert STEER_SIGN == -1

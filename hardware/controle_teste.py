@@ -92,8 +92,9 @@ STEER_CENTER_US = 1500
 # 1300/1700 anteriores eram conservadores e nunca medidos. Mantidos iguais aos
 # do control_map.py de proposito: se o controle manual e o do modelo tiverem
 # esterco diferente, comparar os dois deixa de fazer sentido.
-STEER_LEFT_US   = 1240
-STEER_RIGHT_US  = 1760
+# Espelhado: medido que 1760 us vira a ESQUERDA neste carro (teste_esquerda.py)
+STEER_LEFT_US   = 1760
+STEER_RIGHT_US  = 1240
 
 # --- Limites do ESC (us) - faixa de bancada calibrada (ver MASTER) ---
 THROTTLE_NEUTRO_US = 1500

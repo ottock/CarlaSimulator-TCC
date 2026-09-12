@@ -18,8 +18,22 @@ STEER_CENTER_US = 1500
 # tudo, saturando ou nao. O modelo aprendeu steer=+/-1 significando BATENTE
 # TOTAL, entao este numero tem de ser o batente fisico -- nao e ajuste fino.
 # RE-MEDIR se a geometria da direcao mudar.
-STEER_LEFT_US = 1240
-STEER_RIGHT_US = 1760
+# SINAL MEDIDO em 2026-09-12 com hardware/teste_esquerda.py: comandando
+# steer = -1 (ESQUERDA na convencao do CARLA) as rodas foram para a DIREITA.
+# O servo deste carro responde ESPELHADO.
+#
+# Isso importa muito mais do que parece: o espelho fica DEPOIS do modelo, entao a
+# rede pedia uma coisa e o carro fazia a oposta. Todas as corridas de pista ate
+# aqui mostraram o carro executando o INVERSO da decisao do modelo, e nenhuma
+# delas testou o modelo de fato.
+#
+# A inversao mora numa constante so, de proposito. Um sinal trocado no meio da
+# expressao seria encontrado meses depois, por alguem refazendo este mesmo teste.
+STEER_SIGN = -1
+
+# us que fisicamente viram cada lado NESTE carro (com o espelho ja aplicado).
+STEER_LEFT_US = 1760
+STEER_RIGHT_US = 1240
 STEER_SPAN_US = 260
 ESC_NEUTRAL_US = 1500
 
@@ -46,7 +60,7 @@ def steer_to_us(steer, span_us=STEER_SPAN_US):
     # Clamp s to [-1, 1] before rounding to handle infinity safely while
     # preserving intent: +inf means "hard right", -inf means "hard left".
     s = max(-1.0, min(1.0, s))
-    us = int(round(STEER_CENTER_US + s * span_us))
+    us = int(round(STEER_CENTER_US + STEER_SIGN * s * span_us))
     return max(STEER_CENTER_US - span_us, min(STEER_CENTER_US + span_us, us))
 
 
