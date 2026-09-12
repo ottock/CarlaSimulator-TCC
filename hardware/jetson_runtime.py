@@ -82,10 +82,23 @@ CMD_STOP = bytes([0xAA, 0x55, 0xF5, 0x0A])
 # RE-MEDIR se o LiDAR for remontado: um arco errado cega uma regiao real.
 SELF_OCCLUSION_ARCS = "0:120,210:215"
 
-# Angulo do SENSOR que aponta para a FRENTE do carro. 0.0 = ainda nao calibrado.
-# Enquanto for 0 sem ter sido medido, a janela de 180 graus do modelo pode estar
-# olhando para o lado errado. Calibre com um objeto a frente (ver docs).
-LIDAR_OFFSET_DEG = 0.0
+# CALIBRADO em 2026-09-12 com dois logs de objeto parado (runs/calib_*).
+#
+# Objeto a FRENTE     -> 233.2 graus no sensor  (4 centroides concordando em 0.1)
+# Objeto a ESQUERDA   -> 344.6 graus no sensor
+# Deslocamento frente->esquerda: +111 graus. A convencao do treino tem esquerda em
+# 270 (sim_lidar usa arctan2(y, x), e no CARLA y aponta para a DIREITA), entao um
+# sensor no mesmo sentido daria -90 e um invertido daria +90. O SINAL decide: este
+# gira ao contrario. (A magnitude deu 111 e nao 90 porque o objeto foi posto a mao;
+# 21 graus a 0.76 m sao 28 cm de desvio lateral.)
+#
+# Confirmacao independente: com estes valores o arco da carroceria (0-120 no
+# sensor) cai em 113-233 no frame do carro, centrado em 173 -- ou seja, ATRAS,
+# exatamente como o modelo de FOV 180 assume. Sob a hipotese oposta nao fecharia.
+#
+# RE-CALIBRAR se o LiDAR for remontado.
+LIDAR_OFFSET_DEG = 126.8
+LIDAR_INVERT = True
 
 CAP_WIDTH, CAP_HEIGHT, CAP_FPS = 1280, 720, 60
 # Rotacao da imagem (nvvidconv flip-method): 0 = sem giro, 2 = 180 graus.
@@ -246,8 +259,12 @@ def main():
     p.add_argument("--lidar-offset-deg", type=float, default=LIDAR_OFFSET_DEG,
                    help="Angulo do sensor que aponta para a FRENTE do carro. "
                         "Calibre com um objeto a frente; 0 = sem correcao.")
-    p.add_argument("--lidar-invert", action="store_true",
-                   help="Sensor girando ao contrario do simulador (espelha esq/dir)")
+    p.add_argument("--lidar-invert", dest="lidar_invert", action="store_true",
+                   default=LIDAR_INVERT,
+                   help="Sensor girando ao contrario do simulador (espelha esq/dir). "
+                        "Medido como True neste carro.")
+    p.add_argument("--no-lidar-invert", dest="lidar_invert", action="store_false",
+                   help="Desliga o espelhamento (use se o LiDAR for remontado)")
     p.add_argument("--self-occlusion", default=SELF_OCCLUSION_ARCS,
                    help="Arcos tapados pela carroceria, no frame do sensor: "
                         "'0:120,210:215'. Vazio desliga a mascara.")
