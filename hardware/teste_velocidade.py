@@ -15,14 +15,14 @@ rapido que isso, o carro CORTA as curvas -- falha lateral, dentro do escopo.
 Nao usa camera nem LiDAR: e so servo + ESC. O tempo reportado e o medido com
 `perf_counter` em volta da janela de PWM ligado, nao os `--seconds` nominais.
 
-Para o carro ANDAR:
-    1. ESC_ARMADO = True neste arquivo (nao e flag de CLI de proposito, para
-       ninguem armar sem querer num comando copiado);
-    2. --cruise-us a partir de 1600 (zona morta do ESC abaixo disso).
+O ESC JA VEM ARMADO aqui (ver ESC_ARMADO abaixo): o carro ANDA assim que a
+contagem regressiva acabar. So exige --cruise-us a partir de 1600, que e onde a
+zona morta do ESC termina. Use --parado para ensaiar sem o carro sair do lugar.
 
 Uso:
     python3 hardware/teste_velocidade.py --seconds 5
     python3 hardware/teste_velocidade.py --seconds 15 --cruise-us 1610
+    python3 hardware/teste_velocidade.py --seconds 5 --parado
 
     # depois das duas corridas, so a conta (nao toca no hardware):
     python3 hardware/teste_velocidade.py --calc 5:0.62 15:2.31
@@ -49,8 +49,17 @@ from ai.car.speed_probe import (
     steady_speed_ms,
 )
 
-# Mesma trava do jetson_runtime.py: armar o ESC exige editar o arquivo.
-ESC_ARMADO = False
+# Ao contrario do jetson_runtime.py, este script JA VEM ARMADO.
+#
+# La a trava existe porque o runtime roda o modelo em pista e alguem pode
+# dispara-lo sem querer copiando um comando pronto. Aqui nao: a unica funcao
+# deste arquivo e fazer o carro andar em linha reta para voce medir a distancia.
+# Desarmado ele nao serve para nada, e a trava so garantia que o teste falhasse
+# em silencio na primeira tentativa, depois de voce ja ter marcado o chao.
+#
+# A protecao real fica na contagem regressiva, no --seconds curto por padrao e
+# no --parado, que faz a corrida inteira com o ESC em neutro.
+ESC_ARMADO = True
 
 I2C_ADDRESS = 0x40
 I2C_BUSNUM = 1
@@ -159,15 +168,19 @@ def _modo_corrida(a):
         pwm.set_pwm(channel, 0, max(0, min(4095, passos)))
 
     cruise = clamp_cruise_us(a.cruise_us)
-    anda = ESC_ARMADO and cruise >= ESC_MIN_MOVE_US
+    armado = ESC_ARMADO and not a.parado
+    anda = armado and cruise >= ESC_MIN_MOVE_US
 
     print("")
     print("=== Teste de velocidade ===")
-    print("  ESC ARMADO     %s" % ESC_ARMADO)
+    print("  ESC ARMADO     %s" % armado)
     print("  cruise         %d us (pedido %d)" % (cruise, a.cruise_us))
     print("  servo          %d us (reto)" % a.servo_us)
     print("  duracao        %.1f s" % a.seconds)
-    if not ESC_ARMADO:
+    if a.parado:
+        print("")
+        print("  ENSAIO (--parado): o ESC fica em neutro, o carro nao sai do lugar.")
+    elif not ESC_ARMADO:
         print("")
         print("  O carro NAO vai andar: ESC_ARMADO=False neste arquivo.")
     elif cruise < ESC_MIN_MOVE_US:
@@ -237,6 +250,8 @@ def main():
                         % ESC_MIN_MOVE_US)
     p.add_argument("--servo-us", type=int, default=STEER_CENTER_US,
                    help="PWM do servo; ajuste se o carro nao sair reto")
+    p.add_argument("--parado", action="store_true",
+                   help="ensaio: cumpre a corrida com o ESC em neutro, sem andar")
     p.add_argument("--distancia", type=float, default=None,
                    help="metros medidos, para nao esperar o prompt")
     p.add_argument("--calc", nargs="+", metavar="SEG:METROS", default=None,
