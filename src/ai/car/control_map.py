@@ -14,10 +14,26 @@ STEER_CENTER_US = 1500
 # mecanico faz o servo forcar e aquecer quando o modelo pede esterco total.
 # Antes eram 200, herdados do controle por teclado do controle_teste.py --
 # conservadores e nunca medidos. Com 200, steer=1 entregava dois tercos do curso
-# real, entao TODO comando de esterco saia reduzido em 33% e o carro subvirava em
-# tudo, saturando ou nao. O modelo aprendeu steer=+/-1 significando BATENTE
-# TOTAL, entao este numero tem de ser o batente fisico -- nao e ajuste fino.
+# real, entao TODO comando de esterco saia reduzido em 33%.
 # RE-MEDIR se a geometria da direcao mudar.
+#
+# CORRECAO IMPORTANTE (2026-09-26). Este bloco dizia "o modelo aprendeu
+# steer=+/-1 significando BATENTE TOTAL". E FALSO, e foi medido:
+#
+#     nos 14.400 quadros do dataset_track_v1 o MAIOR |steer| do expert e 0.826,
+#     e o p90 e 0.634. steer = 1.0 nao aparece uma unica vez.
+#
+# O Pure Pursuit a 2.0 m/s com lookahead 4.0 nunca precisou de mais que isso, e
+# a rede nao produz o que nunca viu. Consequencia pratica: mesmo com span = 260
+# o carro so alcanca 0.826 * 260 = 215 us dos 300 us de batente fisico -- 72%.
+# Na curva real medida (runs/Diag PT2) ele usou o pico de 0.640, ou seja 55% do
+# batente, e sustentou 0.284, ou 25%. O carro subvirou com tres quartos do
+# esterco sobrando.
+#
+# Por isso `apply_steer_gain` NAO e' um remendo ate ~1.21 (= 1/0.826): ate ai ele
+# so leva a faixa real de saida da rede ate a faixa real do servo, que e o que
+# esta frase errada supunha ja acontecer. Acima disso vira compensacao para a
+# velocidade (o carro anda ~7x mais rapido que o treino) e ai sim e' ajuste.
 # SINAL MEDIDO em 2026-09-12 com hardware/teste_esquerda.py: comandando
 # steer = -1 (ESQUERDA na convencao do CARLA) as rodas foram para a DIREITA.
 # O servo deste carro responde ESPELHADO.
