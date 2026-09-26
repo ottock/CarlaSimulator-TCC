@@ -103,8 +103,19 @@ THROTTLE_MAX_US    = 1700
 THROTTLE_RE_US     = 1400
 
 # --- Suavidade (rampas) ---
-STEER_STEP_US    = 8
-THROTTLE_STEP_US = 4
+# RAMPA DESLIGADA desde 2026-09-26: a tecla vai DIRETO ao limite, num quadro.
+#
+# Por que: com 8 us/quadro a 30 FPS o servo levava 1,1 s para sair do centro e
+# chegar ao batente (260 us / 8 = 33 quadros), e o throttle 0,8 s. A 1,1 m/s
+# medidos, o carro andava mais de um METRO antes de o esterco completar -- o
+# circulo de batente medido assim inclui um trecho quase reto no comeco e sai
+# maior do que a geometria da direcao realmente permite.
+#
+# Para medir raio de curva, ou para tentar a curva na mao, a rampa tem de sair.
+# Volte RAMPA_LIGADA = True se quiser o comportamento suave de antes.
+RAMPA_LIGADA = False
+STEER_STEP_US    = 8 if RAMPA_LIGADA else (STEER_LEFT_US - STEER_RIGHT_US)
+THROTTLE_STEP_US = 4 if RAMPA_LIGADA else (THROTTLE_MAX_US - THROTTLE_RE_US)
 
 # --- Loop ---
 FPS = 30                  # 30 e suficiente; o radar e pesado a mais que isso
@@ -434,6 +445,13 @@ def main():
     print("")
     print("=== App integrado iniciado ===")
     print("ESC armado: {0}".format(ESC_ARMADO))
+    print("Rampa: {0}".format(
+        "LIGADA (suave)" if RAMPA_LIGADA
+        else "DESLIGADA - a tecla vai direto ao batente, num quadro"))
+    print("  esterco  centro {0} | esq {1} | dir {2} us".format(
+        STEER_CENTER_US, STEER_LEFT_US, STEER_RIGHT_US))
+    print("  throttle neutro {0} | frente {1} | re {2} us".format(
+        THROTTLE_NEUTRO_US, THROTTLE_MIN_US, THROTTLE_RE_US))
     if ESC_ARMADO:
         print("RODAS NO AR e KILL SWITCH na mao.")
     else:
