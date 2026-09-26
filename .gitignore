@@ -30,6 +30,14 @@ runs/
 *.trt
 *.engine
 
+# Excecao: os artefatos de DEPLOY sao versionados. E assim que o modelo chega ao
+# Jetson -- git pull la, nao scp -- e assim ele fica atado ao commit do codigo
+# que o roda, que e o que torna uma corrida reproduzivel. Sao ~1,9 MB.
+# A .engine NAO entra: ela e construida no proprio Jetson pelo trtexec e so vale
+# para aquela versao de TensorRT.
+!models/*.onnx
+!models/*.json
+
 # CARLA specific
 CarlaUE4/
 Carla_*/
