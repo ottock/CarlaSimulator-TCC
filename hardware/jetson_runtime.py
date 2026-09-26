@@ -278,10 +278,15 @@ def main():
                         % (ESC_NEUTRAL_US, ESC_MIN_MOVE_US, ESC_MAX_US))
     p.add_argument("--steer-span-us", type=int, default=None,
                    help="Meia-faixa do servo que steer=1 deve atingir, em us. "
-                        "Padrao 200 (1300-1700), que veio do controle por teclado e "
-                        "e CONSERVADOR. Se o batente real for maior, todo comando de "
-                        "esterco sai reduzido e o carro subvira. Meca com "
-                        "hardware/controle_pwm_steering.py, rodas no ar.")
+                        "Padrao 260, com 40 us de folga do batente medido (300). "
+                        "Se o batente real for maior, todo comando de esterco sai "
+                        "reduzido e o carro subvira. Meca com "
+                        "hardware/calibra_servo.py, rodas no ar.")
+    p.add_argument("--steer-gain", type=float, default=1.0,
+                   help="Multiplica o esterco do modelo antes do servo (clampado "
+                        "em +/-1). Ajuste de ATUADOR, nao do modelo: se a rede ja "
+                        "satura em +/-1 na curva, nao muda nada. Fica no meta.json "
+                        "para as corridas continuarem comparaveis.")
     p.add_argument("--stop-dist", type=float, default=0.25,
                    help="Parada de emergencia: metros no cone frontal (padrao 0.25)")
     p.add_argument("--lidar-offset-deg", type=float, default=LIDAR_OFFSET_DEG,
@@ -335,7 +340,8 @@ def main():
         "cruise_us": a.cruise_us, "stop_dist_m": a.stop_dist,
         "flip_method": a.flip_method,
         "lidar_offset_deg": a.lidar_offset_deg, "lidar_invert": a.lidar_invert,
-        "steer_span_us": a.steer_span_us, "log_inputs": a.log_inputs,
+        "steer_span_us": a.steer_span_us, "steer_gain": a.steer_gain,
+        "log_inputs": a.log_inputs,
         "self_occlusion": a.self_occlusion,
         "engine": os.path.basename(a.engine),
     }, jpeg_every=a.jpeg_every, log_inputs=a.log_inputs)
@@ -346,7 +352,7 @@ def main():
                      cruise_us=a.cruise_us, stop_dist_m=a.stop_dist,
                      lidar_offset_deg=a.lidar_offset_deg,
                      lidar_invert=a.lidar_invert, self_occlusion=arcos,
-                     steer_span_us=a.steer_span_us)
+                     steer_span_us=a.steer_span_us, steer_gain=a.steer_gain)
 
     t_end = time.monotonic() + a.seconds
     n, t_report = 0, time.monotonic()

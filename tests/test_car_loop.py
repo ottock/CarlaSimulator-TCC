@@ -358,3 +358,63 @@ def test_a_lidar_that_stops_spinning_stops_the_car():
     assert tele["stale_lidar"] is True
     assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US
     assert kw["actuator"].servo_history[-1] == STEER_CENTER_US
+
+
+# ---------------------------------------------------------------------------
+# Ganho de esterco no laco (2026-09-26)
+# ---------------------------------------------------------------------------
+
+def _drive_one(loop):
+    """Roda os passos necessarios para a primeira inferencia sair."""
+    loop.step()      # fragmento + 1a volta acumulada
+    return loop.step()
+
+
+def test_the_gain_reaches_the_servo():
+    eng = FakeEngine(out=(0.30, 0.4, 0.0))
+    sem, kw_sem = _loop(engine=eng)
+    _drive_one(sem)
+    us_sem = kw_sem["actuator"].servo_history[-1]
+
+    com, kw_com = _loop(engine=FakeEngine(out=(0.30, 0.4, 0.0)), steer_gain=2.0)
+    _drive_one(com)
+    us_com = kw_com["actuator"].servo_history[-1]
+
+    # 0.30 com ganho 2 tem de dar o mesmo us que 0.60 sem ganho.
+    ref, kw_ref = _loop(engine=FakeEngine(out=(0.60, 0.4, 0.0)))
+    _drive_one(ref)
+    assert us_com == kw_ref["actuator"].servo_history[-1]
+    assert us_com != us_sem
+
+
+def test_the_log_keeps_the_models_raw_steer_not_the_amplified_one():
+    # replay_car_log compara o steer GRAVADO com a saida do modelo para medir
+    # fidelidade. Se o log guardasse o valor ja amplificado, a fidelidade
+    # quebraria e a atribuicao de sensor perderia o sentido.
+    loop, kw = _loop(engine=FakeEngine(out=(0.30, 0.4, 0.0)), steer_gain=2.0)
+    tele = _drive_one(loop)
+    assert tele["steer"] == pytest.approx(0.30)
+    assert kw["logger"].frames[-1]["control"][0] == pytest.approx(0.30)
+
+
+def test_the_applied_steer_is_logged_too_so_runs_stay_comparable():
+    # Sem isto, duas corridas com ganhos diferentes ficam identicas no log.
+    loop, kw = _loop(engine=FakeEngine(out=(0.30, 0.4, 0.0)), steer_gain=2.0)
+    tele = _drive_one(loop)
+    assert tele["steer_aplicado"] == pytest.approx(0.60)
+
+
+def test_the_gain_does_not_move_the_wheel_when_the_model_did_not_run():
+    # Sem volta completa do LiDAR o servo vai ao centro; o ganho nao pode
+    # transformar isso em esterco nenhum.
+    lidar = FakeLidar()
+    lidar.batches = [[(0.0, 2.0), (10.0, 2.0)]]
+    loop, kw = _loop(lidar=lidar, steer_gain=3.0)
+    loop.step()
+    assert kw["actuator"].servo_history == [STEER_CENTER_US]
+
+
+def test_the_default_gain_is_neutral():
+    loop, kw = _loop(engine=FakeEngine(out=(0.30, 0.4, 0.0)))
+    tele = _drive_one(loop)
+    assert tele["steer_aplicado"] == pytest.approx(0.30)

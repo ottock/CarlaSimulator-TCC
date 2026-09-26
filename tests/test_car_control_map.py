@@ -206,3 +206,66 @@ def test_the_mirror_is_a_single_documented_constant():
     """
     from ai.car.control_map import STEER_SIGN
     assert STEER_SIGN == -1
+
+
+# ---------------------------------------------------------------------------
+# Ganho de esterco (2026-09-26)
+#
+# Na pista o carro virou para o lado CERTO e faltou angulo: entrou na curva a
+# esquerda, girou um pouco e bateu com a quina frontal esquerda na parede
+# externa -- subesterco classico. O ganho e a alavanca para testar isso sem
+# recoletar nada. E um AJUSTE DE ATUADOR explicito, nao um conserto do modelo:
+# se a rede ja estiver saturando em +/-1 na curva, ele nao muda nada, e a causa
+# esta na velocidade.
+# ---------------------------------------------------------------------------
+from ai.car.control_map import apply_steer_gain
+
+
+def test_gain_of_one_changes_nothing():
+    for s in (-1.0, -0.37, 0.0, 0.42, 1.0):
+        assert apply_steer_gain(s, 1.0) == pytest.approx(s)
+
+
+def test_gain_amplifies_a_partial_command():
+    assert apply_steer_gain(0.30, 2.0) == pytest.approx(0.60)
+    assert apply_steer_gain(-0.25, 1.6) == pytest.approx(-0.40)
+
+
+def test_gain_cannot_push_past_full_lock():
+    # O batente e fisico: amplificar alem de 1 nao existe no servo.
+    assert apply_steer_gain(0.8, 2.0) == pytest.approx(1.0)
+    assert apply_steer_gain(-0.8, 3.0) == pytest.approx(-1.0)
+
+
+def test_gain_does_nothing_to_a_model_already_saturated():
+    # O caso que decide o diagnostico: se a rede ja pede batente total, ganho
+    # nenhum ajuda, e o problema nao esta aqui.
+    assert apply_steer_gain(1.0, 2.5) == pytest.approx(1.0)
+    assert apply_steer_gain(-1.0, 2.5) == pytest.approx(-1.0)
+
+
+def test_gain_never_flips_the_side():
+    # Ja tivemos um espelho de esterco neste carro; um sinal trocado aqui seria
+    # a mesma falha silenciosa de novo.
+    assert apply_steer_gain(0.5, 2.0) > 0
+    assert apply_steer_gain(-0.5, 2.0) < 0
+
+
+def test_unusable_input_or_gain_centres_the_wheel():
+    assert apply_steer_gain(None, 2.0) == 0.0
+    assert apply_steer_gain(float("nan"), 2.0) == 0.0
+    assert apply_steer_gain("esquerda", 2.0) == 0.0
+    assert apply_steer_gain(0.5, None) == pytest.approx(0.5)
+    assert apply_steer_gain(0.5, float("nan")) == pytest.approx(0.5)
+
+
+def test_a_negative_gain_is_refused_instead_of_mirroring_the_car():
+    # Um ganho negativo espelharia o esterco inteiro -- exatamente o bug que
+    # custou todas as corridas ate 2026-09-12. Recusa explicita.
+    with pytest.raises(ValueError):
+        apply_steer_gain(0.5, -1.0)
+
+
+def test_the_gain_composes_with_the_span_to_reach_the_real_stop():
+    # 0.5 com ganho 2 tem de dar o mesmo us que 1.0 sem ganho.
+    assert steer_to_us(apply_steer_gain(0.5, 2.0)) == steer_to_us(1.0)

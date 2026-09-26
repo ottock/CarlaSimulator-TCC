@@ -16,7 +16,8 @@ import time
 import numpy as np
 
 from ai.car.control_map import (ESC_NEUTRAL_US, STEER_CENTER_US, FrameWatchdog,
-                               clamp_cruise_us, front_blocked, steer_to_us)
+                               apply_steer_gain, clamp_cruise_us, front_blocked,
+                               steer_to_us)
 from ai.car.image_crop import prepare_frame
 from ai.car.lidar_frame import drop_self_occlusion, rotate_angles
 from ai.car.scan_assembly import ScanAssembler
@@ -32,7 +33,7 @@ class DriveLoop:
                  crop_frac, n_sectors=72, clock=None, watchdog=None,
                  cruise_us=ESC_NEUTRAL_US, stop_dist_m=0.25,
                  lidar_offset_deg=0.0, lidar_invert=False, self_occlusion=(),
-                 lidar_timeout_s=0.5, steer_span_us=None):
+                 lidar_timeout_s=0.5, steer_span_us=None, steer_gain=1.0):
         self.camera = camera
         self.lidar = lidar
         self.engine = engine
@@ -56,6 +57,9 @@ class DriveLoop:
         # Um laco rapido pode estar rodando sobre um mapa congelado ha minutos.
         self.lidar_fresh = StaleTracker(lidar_timeout_s)
         self.steer_span_us = steer_span_us
+        # Ganho de esterco: ajuste de ATUADOR, aplicado depois da rede. Padrao
+        # neutro -- amplificar o comando do modelo tem de ser deliberado.
+        self.steer_gain = steer_gain
         self.clock = clock or time.monotonic
         self.watchdog = watchdog or FrameWatchdog()
         self.assembler = ScanAssembler()
@@ -99,11 +103,13 @@ class DriveLoop:
         can_drive = ((self._last_vec is not None) and (not blind)
                      and (not stalled) and (not stale_lidar))
         img = None
+        steer_aplicado = 0.0
         if can_drive:
             img = preprocess(prepare_frame(frame, self.crop_frac))
             control = self.engine.infer(img, self._last_vec)
-            servo_us = (steer_to_us(control[0]) if self.steer_span_us is None
-                        else steer_to_us(control[0], span_us=self.steer_span_us))
+            steer_aplicado = apply_steer_gain(control[0], self.steer_gain)
+            servo_us = (steer_to_us(steer_aplicado) if self.steer_span_us is None
+                        else steer_to_us(steer_aplicado, span_us=self.steer_span_us))
         else:
             servo_us = STEER_CENTER_US
 
@@ -127,7 +133,11 @@ class DriveLoop:
             esc_us=esc_us, blocked=blocked,
             model_input=(None if img is None else
                          ((img.transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8)))
-        return {"t": now, "steer": control[0], "throttle": control[1],
+        # "steer" e o valor CRU do modelo de proposito: o replay_car_log compara
+        # o log com a saida da rede para medir fidelidade, e guardar o valor ja
+        # amplificado quebraria essa conta. O aplicado vai ao lado.
+        return {"t": now, "steer": control[0], "steer_aplicado": steer_aplicado,
+                "throttle": control[1],
                 "brake": control[2], "servo_us": servo_us, "esc_us": esc_us,
                 "blocked": blocked, "blind": blind, "stale_lidar": stale_lidar,
                 "dt": dt,

@@ -64,6 +64,44 @@ def steer_to_us(steer, span_us=STEER_SPAN_US):
     return max(STEER_CENTER_US - span_us, min(STEER_CENTER_US + span_us, us))
 
 
+def apply_steer_gain(steer, gain=1.0):
+    """Amplify the model's steering before it becomes microseconds.
+
+    MEDIDO em 2026-09-26: na curva a esquerda o carro virou para o lado certo e
+    faltou angulo -- bateu com a quina frontal esquerda na parede externa, que e
+    subesterco. Este ganho existe para testar isso em minutos, sem recoletar.
+
+    E honesto sobre o que e: um ajuste de ATUADOR, aplicado depois da rede, nao
+    um conserto do modelo. Duas consequencias que importam para interpretar o
+    resultado:
+
+      - se a rede ja estiver pedindo +/-1 dentro da curva, ganho nenhum muda
+        nada (o clamp abaixo garante isso), e a causa esta em outro lugar --
+        provavelmente na velocidade, que hoje e ~7x a do treino;
+      - o valor usado precisa ficar no log da corrida, senao duas corridas com
+        ganhos diferentes viram a mesma linha no relatorio.
+
+    Um ganho NEGATIVO e recusado: ele espelharia o esterco inteiro, que e
+    exatamente a falha silenciosa que custou todas as corridas ate 2026-09-12.
+    """
+    try:
+        g = float(gain)
+    except (TypeError, ValueError):
+        g = 1.0
+    if g != g:  # NaN
+        g = 1.0
+    if g < 0.0:
+        raise ValueError("ganho de esterco nao pode ser negativo (recebi {0}): "
+                         "isso espelharia o carro".format(gain))
+    try:
+        s = float(steer)
+    except (TypeError, ValueError):
+        return 0.0
+    if s != s:  # NaN
+        return 0.0
+    return max(-1.0, min(1.0, s * g))
+
+
 class FrameWatchdog:
     """Flags a stalled loop: a frame that took longer than ``timeout_s``.
 
