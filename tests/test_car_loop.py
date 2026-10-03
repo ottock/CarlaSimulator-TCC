@@ -418,3 +418,72 @@ def test_the_default_gain_is_neutral():
     loop, kw = _loop(engine=FakeEngine(out=(0.30, 0.4, 0.0)))
     tele = _drive_one(loop)
     assert tele["steer_aplicado"] == pytest.approx(0.30)
+
+
+# ---------------------------------------------------------------------------
+# Mediana causal do esterco no laco (2026-10-03)
+# ---------------------------------------------------------------------------
+
+class SequenceEngine:
+    """Devolve um esterco diferente a cada chamada, para exercitar o filtro."""
+
+    def __init__(self, steers):
+        self.steers = list(steers)
+        self.i = 0
+
+    def infer(self, img, lidar):
+        s = self.steers[min(self.i, len(self.steers) - 1)]
+        self.i += 1
+        return (s, 0.4, 0.0)
+
+
+def _ate_inferencia(loop, eng, n):
+    """Roda o laco ate o modelo ter sido chamado ``n`` vezes.
+
+    O engine so roda a partir do 2o step (a 1a volta do LiDAR ainda esta
+    sendo montada), entao contar steps na mao erra -- e erraria em silencio,
+    testando um quadro diferente do pretendido.
+    """
+    tele = None
+    for _ in range(n + 5):
+        tele = loop.step()
+        if eng.i >= n:
+            return tele
+    raise AssertionError('o modelo nao rodou %d vezes' % n)
+
+
+def test_an_isolated_spike_never_reaches_the_servo():
+    # O padrao medido no carro: dois quadros a +0.4, um sozinho em -0.88, volta.
+    # Os dois primeiros passam direto (janela ainda enchendo); o pico e cortado.
+    eng = SequenceEngine([0.4, 0.4, -0.88, 0.4])
+    loop, kw = _loop(engine=eng, steer_median=3)
+    tele = _ate_inferencia(loop, eng, 3)          # a 3a inferencia e o -0.88
+    assert tele["steer"] == pytest.approx(-0.88)          # cru preservado no log
+    assert tele["steer_aplicado"] == pytest.approx(0.4)   # o servo nao ve o pico
+
+
+def test_the_filter_runs_before_the_gain():
+    # Filtrar depois do ganho trabalharia sobre valores ja grampeados em +/-1 e
+    # perderia a informacao que distingue um pico de uma curva.
+    eng = SequenceEngine([0.4, 0.4, -0.88, 0.4])
+    loop, kw = _loop(engine=eng, steer_median=3, steer_gain=2.0)
+    tele = _ate_inferencia(loop, eng, 3)
+    assert tele["steer_aplicado"] == pytest.approx(0.8)   # 0.4 filtrado, depois x2
+
+
+def test_the_default_does_not_filter():
+    eng = SequenceEngine([0.4, 0.4, -0.88])
+    loop, kw = _loop(engine=eng)
+    tele = _ate_inferencia(loop, eng, 3)
+    assert tele["steer_aplicado"] == pytest.approx(-0.88)
+
+
+def test_a_degraded_frame_clears_the_history():
+    # Sem volta completa do LiDAR o modelo nao roda e o servo vai ao centro.
+    # Guardar o historico atravessando isso faria a curva anterior reaparecer
+    # quando o carro voltasse a enxergar, num lugar que pode ser outro.
+    lidar = FakeLidar()
+    lidar.batches = [[(0.0, 2.0), (10.0, 2.0)]]
+    loop, kw = _loop(lidar=lidar, engine=SequenceEngine([0.9]), steer_median=3)
+    loop.step()
+    assert loop.steer_filter._buf == []

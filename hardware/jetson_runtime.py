@@ -282,6 +282,12 @@ def main():
                         "Se o batente real for maior, todo comando de esterco sai "
                         "reduzido e o carro subvira. Meca com "
                         "hardware/calibra_servo.py, rodas no ar.")
+    p.add_argument("--steer-median", type=int, default=1,
+                   help="Janela IMPAR da mediana causal sobre o esterco cru, "
+                        "antes do ganho. 1 = desligado, 3 = recomendado. Medido "
+                        "em runs/Diag/Diag: corta o |d steer| de 0.156 para 0.091 "
+                        "custando 10%% da magnitude, ao preco de ~1 quadro de "
+                        "atraso. Remove o tremor; NAO faz o carro curvar.")
     p.add_argument("--steer-gain", type=float, default=1.0,
                    help="Multiplica o esterco do modelo antes do servo (clampado "
                         "em +/-1). Ajuste de ATUADOR, nao do modelo: se a rede ja "
@@ -341,6 +347,7 @@ def main():
         "flip_method": a.flip_method,
         "lidar_offset_deg": a.lidar_offset_deg, "lidar_invert": a.lidar_invert,
         "steer_span_us": a.steer_span_us, "steer_gain": a.steer_gain,
+        "steer_median": a.steer_median,
         "log_inputs": a.log_inputs,
         "self_occlusion": a.self_occlusion,
         "engine": os.path.basename(a.engine),
@@ -352,7 +359,8 @@ def main():
                      cruise_us=a.cruise_us, stop_dist_m=a.stop_dist,
                      lidar_offset_deg=a.lidar_offset_deg,
                      lidar_invert=a.lidar_invert, self_occlusion=arcos,
-                     steer_span_us=a.steer_span_us, steer_gain=a.steer_gain)
+                     steer_span_us=a.steer_span_us, steer_gain=a.steer_gain,
+                     steer_median=a.steer_median)
 
     t_end = time.monotonic() + a.seconds
     n, t_report = 0, time.monotonic()

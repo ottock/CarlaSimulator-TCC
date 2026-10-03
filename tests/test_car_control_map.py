@@ -269,3 +269,78 @@ def test_a_negative_gain_is_refused_instead_of_mirroring_the_car():
 def test_the_gain_composes_with_the_span_to_reach_the_real_stop():
     # 0.5 com ganho 2 tem de dar o mesmo us que 1.0 sem ganho.
     assert steer_to_us(apply_steer_gain(0.5, 2.0)) == steer_to_us(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Mediana causal do esterco (2026-10-03)
+#
+# Medido em runs/Diag/Diag, com os dois modelos rodando sobre as MESMAS imagens
+# gravadas: o modelo com aumento fotometrico inverte de lado em 22% dos quadros
+# e salta de batente a batente em quadros isolados. A mediana de 3 corta o
+# |d steer| de 0.156 para 0.091 custando 10% da magnitude; uma EMA alisa parecido
+# mas custa 27%, e magnitude e justamente o que falta.
+#
+# CAUSAL de proposito: no carro nao existe o quadro seguinte. Uma mediana
+# centrada alisaria melhor nos numeros offline e seria impossivel de rodar.
+# ---------------------------------------------------------------------------
+from ai.car.control_map import SteerMedian
+
+
+def test_the_filter_passes_the_first_frames_through():
+    f = SteerMedian(3)
+    assert f.push(0.4) == pytest.approx(0.4)      # sem historico, nao ha o que medianar
+    assert f.push(0.6) == pytest.approx(0.5)      # mediana de dois = media dos dois
+
+
+def test_an_isolated_spike_is_removed():
+    # O padrao real medido: +0.4, +0.4, -0.88, +0.4 -- um quadro sozinho no
+    # outro extremo. E o que fazia o servo nao ir a lugar nenhum.
+    f = SteerMedian(3)
+    f.push(0.4); f.push(0.4)
+    assert f.push(-0.88) == pytest.approx(0.4)
+    assert f.push(0.4) == pytest.approx(0.4)
+
+
+def test_a_sustained_turn_survives_intact():
+    # O que NAO pode acontecer: o filtro comer a curva. Depois da janela encher,
+    # um comando mantido sai igual.
+    f = SteerMedian(3)
+    saida = [f.push(-0.9) for _ in range(6)]
+    assert saida[-3:] == [pytest.approx(-0.9)] * 3
+
+
+def test_a_real_step_costs_one_frame_of_delay():
+    # O preco da causalidade: a mediana so acompanha o degrau no 2o quadro.
+    f = SteerMedian(3)
+    f.push(0.0); f.push(0.0)
+    assert f.push(1.0) == pytest.approx(0.0)      # ainda nao
+    assert f.push(1.0) == pytest.approx(1.0)      # agora sim
+
+
+def test_window_of_one_is_a_passthrough():
+    f = SteerMedian(1)
+    for v in (0.3, -0.9, 0.0, 1.0):
+        assert f.push(v) == pytest.approx(v)
+
+
+def test_an_even_window_is_refused():
+    # Mediana de janela par exige media dos dois centrais, que reintroduz o
+    # pico que o filtro existe para remover. Recusa explicita.
+    with pytest.raises(ValueError):
+        SteerMedian(2)
+    with pytest.raises(ValueError):
+        SteerMedian(0)
+
+
+def test_unusable_values_do_not_poison_the_window():
+    f = SteerMedian(3)
+    f.push(0.5); f.push(0.5)
+    assert f.push(float("nan")) == pytest.approx(0.5)
+    assert f.push(None) == pytest.approx(0.5)
+
+
+def test_reset_clears_the_history():
+    f = SteerMedian(3)
+    f.push(0.9); f.push(0.9); f.push(0.9)
+    f.reset()
+    assert f.push(-0.2) == pytest.approx(-0.2)

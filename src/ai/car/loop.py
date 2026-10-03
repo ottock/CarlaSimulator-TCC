@@ -16,8 +16,8 @@ import time
 import numpy as np
 
 from ai.car.control_map import (ESC_NEUTRAL_US, STEER_CENTER_US, FrameWatchdog,
-                               apply_steer_gain, clamp_cruise_us, front_blocked,
-                               steer_to_us)
+                               SteerMedian, apply_steer_gain, clamp_cruise_us,
+                               front_blocked, steer_to_us)
 from ai.car.image_crop import prepare_frame
 from ai.car.lidar_frame import drop_self_occlusion, rotate_angles
 from ai.car.scan_assembly import ScanAssembler
@@ -33,7 +33,8 @@ class DriveLoop:
                  crop_frac, n_sectors=72, clock=None, watchdog=None,
                  cruise_us=ESC_NEUTRAL_US, stop_dist_m=0.25,
                  lidar_offset_deg=0.0, lidar_invert=False, self_occlusion=(),
-                 lidar_timeout_s=0.5, steer_span_us=None, steer_gain=1.0):
+                 lidar_timeout_s=0.5, steer_span_us=None, steer_gain=1.0,
+                 steer_median=1):
         self.camera = camera
         self.lidar = lidar
         self.engine = engine
@@ -60,6 +61,9 @@ class DriveLoop:
         # Ganho de esterco: ajuste de ATUADOR, aplicado depois da rede. Padrao
         # neutro -- amplificar o comando do modelo tem de ser deliberado.
         self.steer_gain = steer_gain
+        # Mediana causal sobre o esterco CRU, antes do ganho: filtrar depois
+        # trabalharia sobre valores ja grampeados em +/-1. Janela 1 = desligado.
+        self.steer_filter = SteerMedian(steer_median)
         self.clock = clock or time.monotonic
         self.watchdog = watchdog or FrameWatchdog()
         self.assembler = ScanAssembler()
@@ -107,10 +111,16 @@ class DriveLoop:
         if can_drive:
             img = preprocess(prepare_frame(frame, self.crop_frac))
             control = self.engine.infer(img, self._last_vec)
-            steer_aplicado = apply_steer_gain(control[0], self.steer_gain)
+            steer_filtrado = self.steer_filter.push(control[0])
+            steer_aplicado = apply_steer_gain(steer_filtrado, self.steer_gain)
             servo_us = (steer_to_us(steer_aplicado) if self.steer_span_us is None
                         else steer_to_us(steer_aplicado, span_us=self.steer_span_us))
         else:
+            # Quadro degradado: o servo vai ao centro e o historico do filtro
+            # e' descartado. Atravessar a interrupcao faria a curva anterior
+            # reaparecer quando o carro voltasse a enxergar, possivelmente em
+            # outro ponto da pista.
+            self.steer_filter.reset()
             servo_us = STEER_CENTER_US
 
         # Velocidade constante enquanto tudo esta saudavel; ZERO em qualquer

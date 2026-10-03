@@ -118,6 +118,71 @@ def apply_steer_gain(steer, gain=1.0):
     return max(-1.0, min(1.0, s * g))
 
 
+class SteerMedian:
+    """Causal median filter on the steering command.
+
+    MEDIDO em 2026-10-03 (runs/Diag/Diag, os dois modelos rodando sobre as MESMAS
+    imagens gravadas, sem malha fechada): o modelo com aumento fotometrico inverte
+    de lado em 22% dos quadros e salta de um batente ao outro em quadros isolados
+    -- o padrao +0.4, +0.4, -0.88, +0.4. O servo nao acompanha isso: ele entrega a
+    media, que e quase o centro.
+
+    A mediana de 3 corta o ``|d steer|`` medio de 0.156 para 0.091 custando 10% da
+    magnitude. Uma EMA alisa parecido mas custa 27%, e magnitude e exatamente o que
+    falta para a curva.
+
+    CAUSAL de proposito: usa apenas o quadro atual e os anteriores, porque no carro
+    o quadro seguinte ainda nao existe. Custa ~1 quadro de atraso num degrau, que a
+    13 Hz sao 7,7 cm de pista.
+
+    HONESTIDADE SOBRE O ESCOPO: isto remove o tremor, NAO faz o carro curvar. No
+    trecho de curva sustentada dos logs o comando e 0.241 com e sem filtro, e a
+    curva exige o equivalente a 0.44. O conserto daquilo e retreinar com a
+    normalizacao do esterco corrigida -- ver o bloco STEER_SPAN_US acima.
+
+    Python 3.6-safe.
+    """
+
+    def __init__(self, window=3):
+        w = int(window)
+        if w < 1 or w % 2 == 0:
+            raise ValueError(
+                "janela da mediana tem de ser impar e >= 1 (recebi {0}): uma janela "
+                "par faz a media dos dois centrais e devolve o pico que o filtro "
+                "existe para remover".format(window))
+        self.window = w
+        self._buf = []
+
+    def reset(self):
+        """Esquece o historico -- entre corridas, para uma nao contaminar a outra."""
+        self._buf = []
+
+    def push(self, steer):
+        """Add a sample and return the filtered command.
+
+        Um valor inutilizavel (``None``, NaN, nao-numero) e DESCARTADO em vez de
+        entrar na janela: envenenar o historico faria um unico quadro ruim sujar
+        os proximos dois.
+        """
+        try:
+            s = float(steer)
+        except (TypeError, ValueError):
+            s = None
+        if s is not None and s != s:  # NaN
+            s = None
+        if s is not None:
+            self._buf.append(s)
+            if len(self._buf) > self.window:
+                self._buf.pop(0)
+        if not self._buf:
+            return 0.0
+        ordenado = sorted(self._buf)
+        n = len(ordenado)
+        if n % 2:
+            return ordenado[n // 2]
+        return (ordenado[n // 2 - 1] + ordenado[n // 2]) / 2.0
+
+
 class FrameWatchdog:
     """Flags a stalled loop: a frame that took longer than ``timeout_s``.
 
