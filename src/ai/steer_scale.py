@@ -30,12 +30,22 @@ Matematica pura -- nao importa ``carla``, roda nos testes sem simulador.
 import math
 
 # --- carro real, MEDIDO ---
-CAR_MAX_STEER_DEG = 27.0
-CAR_WHEELBASE_M = 0.21
+#
+# O RAIO e a medida primaria, nao o angulo. Medido em 2026-10-03 tracando a
+# circunferencia do centro do eixo TRASEIRO com trava total: 125 cm de diametro.
+# Derivar o raio de um angulo de protractor errou 34% (27 graus previam 0.412 m),
+# porque o protractor mede a geometria parada e o carro e 4WD -- em trava total as
+# dianteiras arrastam e ele abre. O que vale e o que o carro FAZ.
+CAR_MIN_RADIUS_M = 0.625
+CAR_WHEELBASE_M = 0.21          # usado so para relatar o angulo equivalente
 CAR_WIDTH_M = 0.208
 
-# --- pista (mesma fonte que o track_builder) ---
-LANE_WIDTH_M = 0.53
+# Faixa util MEDIDA na pista fisica em 2026-10-03. O track_builder modela 0.53
+# (as pecas vieram do Blender com essa medida), entao o simulador e 3 cm mais
+# APERTADO que a realidade -- erro na direcao segura: um modelo treinado na pista
+# estreita transfere para a larga, nao o contrario. Nao vale re-modelar os props.
+LANE_WIDTH_M = 0.56
+LANE_WIDTH_SIM_M = 0.53
 
 # --- escala do gemeo digital ---
 SCALE = 12.0
@@ -75,8 +85,7 @@ def steer_deg_for_radius(wheelbase_m, radius_m):
     return math.degrees(math.atan(L / R))
 
 
-def sim_max_steer_deg(car_max_steer_deg=CAR_MAX_STEER_DEG,
-                      car_wheelbase_m=CAR_WHEELBASE_M,
+def sim_max_steer_deg(car_min_radius_m=CAR_MIN_RADIUS_M,
                       sim_wheelbase_m=SIM_WHEELBASE_M,
                       scale=SCALE):
     """Angulo maximo de roda a impor ao carro do SIMULADOR.
@@ -85,6 +94,10 @@ def sim_max_steer_deg(car_max_steer_deg=CAR_MAX_STEER_DEG,
     igual ao raio minimo do carro real. Nao e o angulo do carro: veiculos de
     entre-eixos diferentes precisam de angulos diferentes para o mesmo raio.
 
+    Entra o RAIO medido, nao um angulo. Partir do angulo exigiria tambem o
+    entre-eixos do carro, e os dois entrariam com erro -- foi assim que a versao
+    anterior deste modulo errou 34%.
+
     Este numero vai para DOIS lugares, e os dois sao obrigatorios:
       1. ``max_steer_deg`` do Pure Pursuit -- o denominador da normalizacao;
       2. ``max_steer_angle`` das rodas dianteiras na physics control do CARLA.
@@ -92,8 +105,7 @@ def sim_max_steer_deg(car_max_steer_deg=CAR_MAX_STEER_DEG,
     Mudar so o (1) faz o expert comandar 1.0 enquanto o carro do sim ainda gira
     70 graus: ele corta a curva, oscila, e o traçado gravado nao vale nada.
     """
-    r_car = turning_radius_m(car_wheelbase_m, car_max_steer_deg)
-    return steer_deg_for_radius(sim_wheelbase_m, r_car * float(scale))
+    return steer_deg_for_radius(sim_wheelbase_m, float(car_min_radius_m) * float(scale))
 
 
 def max_usable_radius_m(lane_width_m=LANE_WIDTH_M, vehicle_width_m=CAR_WIDTH_M):

@@ -15,10 +15,11 @@ import math
 import pytest
 
 from ai.steer_scale import (
-    CAR_MAX_STEER_DEG,
+    CAR_MIN_RADIUS_M,
     CAR_WHEELBASE_M,
     CAR_WIDTH_M,
     LANE_WIDTH_M,
+    LANE_WIDTH_SIM_M,
     SCALE,
     corner_fits,
     max_usable_radius_m,
@@ -29,10 +30,20 @@ from ai.steer_scale import (
 
 
 def test_the_measured_car_constants_are_the_ones_we_measured():
-    assert CAR_MAX_STEER_DEG == pytest.approx(27.0)
+    # 125 cm de diametro tracados no centro do eixo traseiro, trava total.
+    assert CAR_MIN_RADIUS_M == pytest.approx(0.625)
     assert CAR_WHEELBASE_M == pytest.approx(0.21)
     assert CAR_WIDTH_M == pytest.approx(0.208)
+    assert LANE_WIDTH_M == pytest.approx(0.56)
     assert SCALE == pytest.approx(12.0)
+
+
+def test_the_radius_is_the_primary_measurement_not_the_angle():
+    # Um protractor deu 27 graus, que preveriam 0.412 m -- 34% errado. O carro e
+    # 4WD: em trava total as dianteiras arrastam e ele abre. Vale o que ele FAZ.
+    equivalente = steer_deg_for_radius(CAR_WHEELBASE_M, CAR_MIN_RADIUS_M)
+    assert equivalente == pytest.approx(18.6, abs=0.1)
+    assert equivalente < 27.0
 
 
 def test_turning_radius_is_the_bicycle_model():
@@ -65,53 +76,51 @@ def test_impossible_geometry_raises_instead_of_returning_nonsense():
 
 
 def test_the_sim_angle_matches_the_RADIUS_not_the_angle():
-    # O numero que vai para o CARLA. Com o Tesla de 2.875 m, igualar o raio
-    # escalado do carro (0.412 x 12 = 4.95 m) pede ~30.2 graus, nao os 27.
+    # O numero que vai para o CARLA: igualar o raio escalado (0.625 x 12 = 7.5 m)
+    # com o Tesla de 2.875 m de entre-eixos pede ~21.0 graus.
     deg = sim_max_steer_deg()
-    assert deg == pytest.approx(30.2, abs=0.1)
-    assert deg > CAR_MAX_STEER_DEG      # o Tesla e mais comprido, precisa de mais
+    assert deg == pytest.approx(21.0, abs=0.1)
 
 
 def test_the_calibrated_sim_reproduces_the_cars_minimum_radius():
-    deg = sim_max_steer_deg()
-    r_sim = turning_radius_m(2.875, deg)
-    r_car = turning_radius_m(CAR_WHEELBASE_M, CAR_MAX_STEER_DEG)
-    assert r_sim / SCALE == pytest.approx(r_car, rel=1e-3)
+    r_sim = turning_radius_m(2.875, sim_max_steer_deg())
+    assert r_sim / SCALE == pytest.approx(CAR_MIN_RADIUS_M, rel=1e-3)
 
 
 def test_a_vehicle_scaled_exactly_needs_the_cars_own_angle():
-    # Controle de sanidade da formula: se o carro do sim fosse o WLtoys x12,
-    # o angulo teria de ser identico.
+    # Controle de sanidade: se o carro do sim fosse o WLtoys x12, o angulo teria
+    # de ser o angulo equivalente do proprio carro.
     deg = sim_max_steer_deg(sim_wheelbase_m=CAR_WHEELBASE_M * SCALE)
-    assert deg == pytest.approx(CAR_MAX_STEER_DEG)
+    assert deg == pytest.approx(steer_deg_for_radius(CAR_WHEELBASE_M, CAR_MIN_RADIUS_M))
 
 
 def test_the_usable_radius_is_limited_by_the_body_not_the_lane():
     # A curva e 1/4 de disco com raio interno ZERO, entao o limite e so a parede
     # externa: o eixo do carro pode ir ate a largura da faixa menos meia largura.
     assert max_usable_radius_m() == pytest.approx(LANE_WIDTH_M - CAR_WIDTH_M / 2)
-    assert max_usable_radius_m() == pytest.approx(0.426, abs=1e-3)
+    assert max_usable_radius_m() == pytest.approx(0.456, abs=1e-3)
 
 
-def test_the_measured_car_fits_the_corner_but_barely():
-    r_min = turning_radius_m(CAR_WHEELBASE_M, CAR_MAX_STEER_DEG)
-    assert corner_fits(r_min) is True
-    folga = max_usable_radius_m() - r_min
-    assert folga == pytest.approx(0.014, abs=2e-3)      # 1,4 cm
+def test_the_measured_car_does_NOT_fit_a_concentric_arc():
+    # O resultado duro: mesmo com a faixa real de 0.56 m, seguir a curva por
+    # dentro exigiria 0.456 m e o carro faz 0.625. Falta 17 cm. Por isso o
+    # expert TEM de cortar o apice -- nao e preferencia de traçado.
+    assert corner_fits(CAR_MIN_RADIUS_M) is False
+    assert max_usable_radius_m() == pytest.approx(0.456, abs=1e-3)
+    assert CAR_MIN_RADIUS_M - max_usable_radius_m() == pytest.approx(0.169, abs=2e-3)
 
 
-def test_a_weaker_steering_would_not_fit_and_the_check_says_so():
-    # Com 24 graus (o valor aparente medido em velocidade alta) nao caberia.
-    # E este teste que impede alguem de coletar um dataset impossivel.
-    assert corner_fits(turning_radius_m(CAR_WHEELBASE_M, 24.0)) is False
+def test_the_extra_three_centimetres_of_real_track_help_but_do_not_save_it():
+    assert max_usable_radius_m(lane_width_m=0.53) == pytest.approx(0.426, abs=1e-3)
+    assert corner_fits(CAR_MIN_RADIUS_M, lane_width_m=0.53) is False
 
 
-def test_the_calibrated_sim_car_also_fits_its_own_corner():
-    # Se o carro do sim NAO couber na curva do sim, o expert bate e o dataset
-    # inteiro nao presta. Tesla: 2.0 m de largura, faixa de 6.36 m.
+def test_the_calibrated_sim_car_also_cannot_take_a_concentric_arc():
+    # E CORRETO que nao caiba: o simulador agora mente menos. Foi exatamente por
+    # isto que o expert travou na verificacao -- ele perseguia a linha de centro.
     r_sim = turning_radius_m(2.875, sim_max_steer_deg())
-    assert corner_fits(r_sim, lane_width_m=LANE_WIDTH_M * SCALE,
-                       vehicle_width_m=2.0) is True
+    assert corner_fits(r_sim, lane_width_m=LANE_WIDTH_SIM_M * SCALE,
+                       vehicle_width_m=2.0) is False
 
 
 # ---------------------------------------------------------------------------
