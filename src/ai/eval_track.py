@@ -82,8 +82,12 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                 x0, y0, yaw0 = centerline[0]
                 spawn_tf = carla.Transform(carla.Location(x0, y0, z_spawn),
                                            carla.Rotation(yaw=math.degrees(yaw0)))
+                # O mesmo limite de esterco do treino. Avaliar com 70 graus um
+                # modelo treinado com 30 mediria um carro que nao existe.
                 ego, sensors = spawn_actor_vehicle(
-                    world, pista_actors, actor_cfg, spawn_transform=spawn_tf)
+                    world, pista_actors, actor_cfg, spawn_transform=spawn_tf,
+                    max_steer_deg=float(track_cfg0.get("professor", {})
+                                        .get("max_steer_deg", 70.0)))
                 for _ in range(10):
                     world.tick()
                 collisions = _attach_collision_sensor(world, ego, pista_actors)

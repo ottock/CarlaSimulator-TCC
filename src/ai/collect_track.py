@@ -139,8 +139,13 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                 x0, y0, yaw0 = centerline[0]
                 spawn_tf = carla.Transform(carla.Location(x0, y0, z_spawn),
                                            carla.Rotation(yaw=math.degrees(yaw0)))
+                # UMA fonte para o esterco: o mesmo numero limita a roda no
+                # CARLA e normaliza o Pure Pursuit logo abaixo. Separa-los faz
+                # o expert comandar 1.0 enquanto o carro gira muito mais.
+                max_steer = float(prof.get("max_steer_deg", 70.0))
                 ego, sensors = spawn_actor_vehicle(
-                    world, pista_actors, actor_cfg, spawn_transform=spawn_tf)
+                    world, pista_actors, actor_cfg, spawn_transform=spawn_tf,
+                    max_steer_deg=max_steer)
                 for _ in range(10):
                     world.tick()
 
@@ -149,7 +154,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     lookahead=float(prof.get("lookahead", 4.0)),
                     target_speed=float(prof.get("target_speed", 3.0)),
                     k_throttle=float(prof.get("k_throttle", 0.5)),
-                    max_steer_deg=float(prof.get("max_steer_deg", 70.0)))
+                    max_steer_deg=max_steer)
 
                 for _ep in range(episodes_por_pista):
                     writer = EpisodeWriter(_episode_dir(out_dir, global_ep))

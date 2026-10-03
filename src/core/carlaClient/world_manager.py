@@ -7,6 +7,7 @@ from typing import Generator, Optional
 from contextlib import contextmanager
 
 # project imports
+from ai.steer_scale import steering_wheel_indices
 from core.carlaClient.sensor_manager import setup_sensors
 
 # constants
@@ -225,6 +226,43 @@ def spawn_random_pedestrians(world: carla.World, actor_list: list, count: int = 
         raise
 
 
+
+def apply_max_steer_angle(vehicle, max_steer_deg: float) -> float:
+    """Limit the vehicle's front-wheel steering angle, in degrees.
+
+    MEDIDO 2026-10-03: o Tesla do CARLA esterca ate 70 graus e o WLtoys real so
+    27. Como o `steer` normalizado e `angulo / angulo_maximo`, o mesmo comando
+    significava angulos quase 3x diferentes nos dois lados, e o carro subvirava
+    em toda curva sem nenhum erro aparecer. Limitar aqui faz o simulador virar
+    um gemeo digital da DIRECAO, nao so da geometria da pista.
+
+    Tem de andar junto com o `max_steer_deg` do Pure Pursuit: mudar so o
+    denominador da normalizacao faria o expert comandar 1.0 enquanto o carro do
+    sim continua girando 70 graus -- ele corta a curva, oscila, e o traçado
+    gravado nao presta.
+
+    Devolve o angulo efetivamente aplicado. Levanta em vez de seguir em silencio:
+    uma coleta inteira com o esterco errado custa a coleta e o treino.
+    """
+    pc = vehicle.get_physics_control()
+    rodas = pc.wheels
+    idx = steering_wheel_indices([w.max_steer_angle for w in rodas])
+    antes = rodas[idx[0]].max_steer_angle
+    for i in idx:
+        rodas[i].max_steer_angle = float(max_steer_deg)
+    pc.wheels = rodas            # a lista e copia: reatribuir e obrigatorio
+    vehicle.apply_physics_control(pc)
+
+    conferido = vehicle.get_physics_control().wheels[idx[0]].max_steer_angle
+    if abs(conferido - float(max_steer_deg)) > 0.1:
+        raise RuntimeError(
+            "o CARLA nao aceitou o limite de esterco: pedi {0:.1f} graus e li "
+            "{1:.1f} de volta".format(float(max_steer_deg), conferido))
+    logger.info("Esterco limitado: %.1f -> %.1f graus nas rodas %s",
+                antes, conferido, idx)
+    return conferido
+
+
 def spawn_actor_vehicle(
     world: carla.World,
     actor_list: list,
@@ -232,6 +270,7 @@ def spawn_actor_vehicle(
     traffic_manager: Optional[object] = None,
     ignore_traffic_lights: bool = False,
     spawn_transform: Optional[object] = None,
+    max_steer_deg: Optional[float] = None,
 ) -> tuple[carla.Vehicle, dict]:
     """Spawn the main actor vehicle with sensors.
 
@@ -243,6 +282,9 @@ def spawn_actor_vehicle(
         spawn_transform: Optional explicit ``carla.Transform`` to spawn at (e.g. the
             first centerline waypoint on the custom track, which has no native spawn
             points). When None, uses the map's spawn point at ``spawn_index``.
+        max_steer_deg: quando dado, limita o angulo das rodas dianteiras
+            (ver :func:`apply_max_steer_angle`). Tem de ser o MESMO valor que o
+            Pure Pursuit usa para normalizar.
 
     Returns:
         Tuple of (vehicle, sensors_dict).
@@ -276,6 +318,9 @@ def spawn_actor_vehicle(
         # Spawn vehicle
         vehicle = world.spawn_actor(vehicle_bp, spawn_point)
         actor_list.append(vehicle)
+
+        if max_steer_deg is not None:
+            apply_max_steer_angle(vehicle, float(max_steer_deg))
 
         # Keep the ego's lights off for cleaner, consistent camera data.
         try:

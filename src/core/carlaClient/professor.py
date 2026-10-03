@@ -15,6 +15,7 @@ except ImportError:          # ambiente sem CARLA (ex.: testar so o controlador)
     carla = None
 
 # reusa a geometria da pista: os waypoints saem da MESMA descricao que monta a pista
+from core.carlaClient.world_manager import apply_max_steer_angle
 from core.carlaClient.track_builder import gerar_waypoints
 
 logger = logging.getLogger(__name__)
@@ -262,6 +263,8 @@ def run_professor(world, track_cfg, actor_list):
         logger.error("Professor: falha ao spawnar o ego em (%.1f, %.1f)", x0, y0)
         return
     actor_list.append(ego)
+    # Mesmo numero que normaliza o Pure Pursuit abaixo (ver ai.steer_scale).
+    apply_max_steer_angle(ego, float(prof.get("max_steer_deg", 70.0)))
     logger.info("Professor: ego %s spawnado; %d waypoints", ego.type_id, len(waypoints))
 
     cam, lid = _montar_sensores_professor(
