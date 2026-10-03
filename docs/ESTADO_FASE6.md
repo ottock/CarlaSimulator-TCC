@@ -183,3 +183,52 @@ dois sentidos do eixo.
 - Branch **`feat/ai-fase4-pista-custom`**.
 - **125 testes verdes** (`pytest -q`).
 - Comandos da 6a (retreino, eval, ablação, export): §6 do `docs/ESTADO_IA.md`.
+
+---
+
+## Fase 6c — calibração do esterço (2026-10-03)
+
+**A causa raiz do subesterço no carro.** O `steer` normalizado é `ângulo_da_roda /
+ângulo_máximo`, e esse máximo não estava em escala: **70°** no Tesla do CARLA contra
+**27° medidos** no WLtoys 124017 V2. O mesmo número significava ângulos quase 3×
+diferentes — o modelo pedia 42° e o carro entregava 15°.
+
+O que tem de casar é o **raio escalado**, não o ângulo (o Tesla tem 2,875 m de
+entre-eixos contra 0,21 × 12 = 2,52 m do carro, 14% de diferença). Igualando o raio
+sai **30,2°** → `src/ai/steer_scale.py`, com as medidas do carro num lugar só.
+
+### A verificação reprovou — e o número que explica
+
+| config | volta | v média | parado | \|steer\|=1 |
+|---|---|---|---|---|
+| 70°, Ld 4,0 (**controle**) | **112%** | 1,73 | 0,8% | 0,0% |
+| 30,2°, Ld 4,0 | 46% | 0,71 | 59,2% | 71,7% |
+| 30,2°, Ld 8,0 | 45% | 0,69 | 57,3% | 6,1% |
+| 30,2°, Ld 4,0, alvo 1,0 m/s | 45% | 0,47 | 44,0% | 59,9% |
+
+O controle fecha a volta limpo **pelo código novo**, então `apply_max_steer_angle`
+não quebrou a física: a causa é o limite em si. Com 30,2° o expert encosta na parede
+**externa** no meio da primeira curva e fica preso — trava total, acelerador cheio,
+parado por mais da metade do episódio. Confirmado nos frames (lente tomada por parede).
+
+**O número:** com 70° o expert usa até `steer` 0,64 = **44,8° de roda = raio 2,89 m**
+no sim = **0,241 m** na escala do carro. O carro real só faz **0,412 m**. O traçado
+que o Pure Pursuit segue exige **1,7× mais esterço do que o carro tem** — não é
+artefato de normalização, e nenhum ajuste de lookahead ou velocidade muda isso
+(testados acima).
+
+### Por que nenhum parâmetro resolve
+
+O Pure Pursuit **segue** um caminho, não planeja um. Ele persegue a linha de centro,
+não tem noção de corredor viável, e quando satura simplesmente abre e bate.
+
+### O caminho viável existe
+
+A curva é 1/4 de disco com raio interno **zero**, então cortar o ápice é permitido.
+Um arco de **R = 4,95 m** (o raio mínimo do carro ×12) tangente às duas retas passa
+com **1,72 m de folga** no sim — 14 cm no carro. É também a linha que o carro real é
+obrigado a fazer (e a que o Rafael faz quando dirige na mão), então é o que o modelo
+precisa aprender.
+
+**Próximo passo:** gerar o caminho do expert com esse arco no lugar do arco da linha
+de centro, re-verificar, e só então recoletar e retreinar.
