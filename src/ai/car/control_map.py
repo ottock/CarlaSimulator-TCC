@@ -10,10 +10,10 @@ Numbers come from ``hardware/controle_teste.py``, already validated on the car.
 STEER_CENTER_US = 1500
 # Batente MEDIDO no carro em 2026-09-12 com hardware/calibra_servo.py, passo a
 # passo ate a roda parar de responder: delta maximo 300 us para cada lado.
-# USAMOS 350 desde 2026-10-04. ATENCAO: o batente exato ainda nao foi fixado --
-# sabemos que esta ENTRE 300 e 350, porque 350 e 400 dao o mesmo circulo de
-# 94 cm. Comandar 350 pode estar forcando contra o limite; assim que o valor
-# visual sair do calibra_servo.py, baixar para ele.
+# USAMOS 350 desde 2026-10-04, CONFIRMADO no servo: entre 300 e 350 a roda ainda
+# ganha angulo (pouco, mas ganha), sem zumbido e sem o servo travado -- ou seja,
+# 350 esta no fim do curso util e nao forcando contra ele. Em 400 o circulo e
+# identico ao de 350, entao dali em diante so sobra forca.
 # Historico: Os 40 us de folga que
 #   span 260 -> circulo 125 cm -> R 0,625 m ->  9% de reserva: o expert travava
 #   span 300 -> circulo 107 cm -> R 0,535 m -> 22% de reserva: dirige, raspa

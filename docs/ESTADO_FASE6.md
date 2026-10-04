@@ -264,3 +264,40 @@ Pendência conhecida: o expert ainda **toca a parede externa em 6% dos quadros**
 (mínimo −0,24 m). Ele completa as voltas, mas o traçado tem degrau de curvatura
 na entrada do arco e o Pure Pursuit sai por fora ali. Uma transição em clotoide
 resolveria.
+
+### Batente real: 350 µs (2026-10-04)
+
+O batente de ±300 medido em 12/09 estava errado — havia um **fio solto** no servo,
+e a roda "parava de responder" por falha de contato. Remedido com o fio consertado,
+e confirmado olhando o servo (ainda ganha ângulo entre 300 e 350, sem zumbido e sem
+travar):
+
+| span | círculo | raio | reserva na ponta |
+|---|---|---|---|
+| 260 µs | 125 cm | 0,625 m | 9% — o expert travava |
+| 300 µs | 107 cm | 0,535 m | 22% — dirige, raspa 6% |
+| **350 µs** | **94 cm** | **0,470 m** | **31%** |
+| 400 µs | 94 cm | — | idêntico: já é batente |
+
+**Expert no `oval_tcc`, 120 s:** 3,57 voltas, 1,74 m/s, parado 0,4%,
+**encosta na parede 0,0%**, satura 0,6%. O ápice se resolveu com a autoridade de
+direção extra — sem margem de parede e sem clotoide.
+
+Esterço do expert: |steer| médio **0,697**, p90 **0,917**, acima de 0,7 em **61%**
+dos quadros. No `dataset_track_v1` (sobre o eixo da pista) era 0,308 de média e
+0,826 de máximo — um alvo que o carro nunca conseguiu executar.
+
+### Velocidade do simulador: não é a alavanca que parecia
+
+O Pure Pursuit é geométrico (`delta = atan(2L·sin(α)/Ld)`, sem termo de
+velocidade), então o par (imagem, esterço) que o modelo aprende é o **mesmo** a
+1,74 ou a 4,0 m/s. Muda só a quantidade de quadros por volta (726 contra 353).
+
+Testado: 4,0 m/s dá 7,35 voltas com 0,0% de contato — funciona, mas não compra
+transferência. **Mantido 2,0**, que rende o dobro de quadros por volta e um pouco
+mais de folga de parede.
+
+O descasamento de velocidade que importa não é a amplitude do esterço; é quanto o
+carro anda **às cegas entre duas decisões**: 6,7 cm no carro (1,0 m/s a 15 Hz)
+contra 0,73 cm equivalentes no treino, e nesses 6,7 cm o rumo muda 5,7°. A alavanca
+para isso é o **FPS do Jetson**, não a velocidade do simulador.
