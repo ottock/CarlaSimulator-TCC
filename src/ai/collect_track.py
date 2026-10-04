@@ -33,6 +33,7 @@ import carla
 import numpy as np
 
 from ai.dataset_writer import EpisodeWriter, write_meta, LABEL_COLUMNS
+from ai.noise import SteeringNoiseInjector
 from ai.recovery_schedule import RecoveryScheduler
 from ai.report import dataset_report, print_report
 from ai.sim_lidar import points_to_sectors_m
@@ -108,7 +109,8 @@ def _teleport_offcenter_track(vehicle, centerline, rng, max_lat, max_yaw, z):
 def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=60.0,
                   launch=True, quality="Low", recovery=False, recovery_every=5.0,
                   recovery_lat=0.8, recovery_yaw=18.0, recovery_min_speed=1.0, seed=0,
-                  tracado="estadio", margem=0.0):
+                  tracado="estadio", margem=0.0, recovery_amp=0.2,
+                  teleporte=False):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -127,6 +129,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         "camera": actor_cfg.get("camera", {}),
         "lidar_sectors": {"n_sectors": LIDAR_N_SECTORS, "max_range_m": LIDAR_MAX_RANGE_M},
         "tracado": tracado, "margem_parede_m": margem,
+        "recovery_modo": ("teleporte" if teleporte else "ruido"),
+        "recovery_amp": recovery_amp,
         "recovery": ({"every_s": recovery_every, "lat_m": recovery_lat, "yaw_deg": recovery_yaw}
                      if recovery else None),
         "label_columns": LABEL_COLUMNS,
@@ -142,6 +146,20 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         with simulation_context(client, wc) as (world, _actor_list):
             fixed = world.get_settings().fixed_delta_seconds or 0.05
             steps_per_ep = int(seconds / fixed)
+            # RUIDO em vez de TELEPORTE para gerar recuperacao.
+            #
+            # Medido em 2026-10-04: o teleporte (lateral ate 1,2 m + ate 18 graus
+            # de guinada) TRAVA o carro nesta pista. O ep0 ficou 54% parado e
+            # terminou com v=0,01; os seis episodios seguintes foram 100% parados.
+            # set_transform mantem a velocidade antiga enquanto troca a pose, e um
+            # Tesla de 4,7 m atravessado numa faixa de 6,36 encrava.
+            #
+            # O injetor perturba o esterco APLICADO em surtos e grava como rotulo o
+            # comando LIMPO do expert. O carro deriva por fisica, nunca em pose
+            # impossivel, e aprende a correcao para os estados em que derivou.
+            ruido = SteeringNoiseInjector(
+                dt=fixed, active_fraction=0.3, amplitude=recovery_amp,
+                seed=seed) if recovery else None
             sched = RecoveryScheduler(interval_steps=max(1, int(recovery_every / fixed)),
                                       window_steps=int(1.5 / fixed), enabled=recovery)
             rng = random.Random(seed)
@@ -203,10 +221,16 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     try:
                         for step in range(steps_per_ep):
                             moving = _speed_ms(ego) >= recovery_min_speed
-                            if sched.should_teleport(step, moving):
-                                # Cutuca para fora do TRACADO: o que a rede tem de
-                                # aprender a recuperar e a linha que ela vai dirigir.
-                                _teleport_offcenter_track(ego, trajeto, rng,
+                            if teleporte and sched.should_teleport(step, moving):
+                                # Cutuca a partir do EIXO, nao do traçado. O
+                                # traçado ja encosta no limite do corredor: somar
+                                # um empurrao para fora dele poe a carroceria na
+                                # parede. A partir do eixo a perturbacao cobre a
+                                # faixa inteira com folga dos dois lados, e o
+                                # Pure Pursuit traz de volta AO TRACADO -- que e
+                                # exatamente o exemplo de recuperacao que a rede
+                                # precisa.
+                                _teleport_offcenter_track(ego, centerline, rng,
                                                           recovery_lat, recovery_yaw, z_spawn)
                                 sched.mark(step)
 
@@ -214,13 +238,21 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                             speed = _speed_ms(ego)
                             steer, throttle, brake = pp.control(
                                 tf.location.x, tf.location.y, math.radians(tf.rotation.yaw), speed)
+                            # O rotulo e sempre o esterco LIMPO; o ruido so vai para
+                            # o atuador. E isso que transforma a deriva em exemplo
+                            # de recuperacao em vez de em ruido no alvo.
+                            if ruido is not None:
+                                extra, ruidando = ruido.step()
+                                aplicado = max(-1.0, min(1.0, steer + extra))
+                            else:
+                                ruidando, aplicado = False, steer
                             ego.apply_control(carla.VehicleControl(
-                                steer=steer, throttle=throttle, brake=brake))
+                                steer=aplicado, throttle=throttle, brake=brake))
                             world.tick()
 
                             obs = read_observation(ego, sensors)
                             dev, _ = deviation_from_centerline(centerline, tf.location.x, tf.location.y)
-                            recovering = sched.is_recovering(step)
+                            recovering = ruidando or (teleporte and sched.is_recovering(step))
                             if obs["image"] is not None and dev <= lim_fora:
                                 lidar_m = points_to_sectors_m(
                                     _lidar_points(obs), n_sectors=LIDAR_N_SECTORS,
@@ -270,6 +302,12 @@ def main():
                         "simulador. 0 usa o corredor inteiro e o expert raspa: "
                         "o Pure Pursuit erra 0,37 m em media.")
     p.add_argument("--recovery", action="store_true")
+    p.add_argument("--recovery-amp", type=float, default=0.2, metavar="A",
+                   help="amplitude do ruido de esterco (so com --recovery)")
+    p.add_argument("--teleporte", action="store_true",
+                   help="recupera por TELEPORTE em vez de ruido. Medido: nesta "
+                        "pista o teleporte trava o carro e o episodio inteiro "
+                        "vira quadros parados.")
     p.add_argument("--recovery-every", type=float, default=5.0)
     p.add_argument("--recovery-lat", type=float, default=0.8)
     p.add_argument("--recovery-yaw", type=float, default=18.0)
@@ -286,7 +324,8 @@ def main():
         episodes_por_pista=a.episodes_por_pista, seconds=a.seconds,
         launch=not a.no_launch, quality=a.quality, recovery=a.recovery,
         recovery_every=a.recovery_every, recovery_lat=a.recovery_lat,
-        recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado, margem=a.margem)
+        recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado, margem=a.margem,
+        recovery_amp=a.recovery_amp, teleporte=a.teleporte)
 
 
 if __name__ == "__main__":
