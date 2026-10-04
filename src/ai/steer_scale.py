@@ -35,7 +35,13 @@ import math
 # centro do eixo TRASEIRO com trava total.
 #
 # 2026-10-03, span 260 us: 125 cm de diametro -> R = 0,625 m.
-# 2026-10-04, span 300 us: 107 cm de diametro -> R = 0,535 m.  <-- este vale.
+# 2026-10-04, span 300 us: 107 cm de diametro -> R = 0,535 m.
+# 2026-10-04, span 350 us:  94 cm de diametro -> R = 0,470 m.  <-- este vale.
+# 2026-10-04, span 400 us:  94 cm -- identico, ou seja o batente mecanico ja
+#   foi atingido antes dos 350 e dali em diante o servo so forca.
+#
+# O batente de 300 us medido em 2026-09-12 estava errado: havia um fio solto no
+# servo, e a roda "parava de responder" por falha de contato, nao por limite.
 #
 # Os 260 us vinham do controle por teclado e deixavam 40 us de folga do batente
 # medido (300) para o servo nao forcar. Custaram 13% do curso, e esses 13% eram
@@ -44,7 +50,7 @@ import math
 # Derivar o raio de um angulo de protractor errou 34% (27 graus previam 0.412 m),
 # porque o protractor mede a geometria parada e o carro e 4WD -- em trava total as
 # dianteiras arrastam e ele abre. O que vale e o que o carro FAZ.
-CAR_MIN_RADIUS_M = 0.535
+CAR_MIN_RADIUS_M = 0.470
 CAR_WHEELBASE_M = 0.21          # usado so para relatar o angulo equivalente
 # 36 x 21 cm MEDIDOS no carro (o catalogo diz 35,6 x 20,8; vale a trena).
 CAR_LENGTH_M = 0.36

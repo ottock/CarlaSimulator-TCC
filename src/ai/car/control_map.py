@@ -10,11 +10,16 @@ Numbers come from ``hardware/controle_teste.py``, already validated on the car.
 STEER_CENTER_US = 1500
 # Batente MEDIDO no carro em 2026-09-12 com hardware/calibra_servo.py, passo a
 # passo ate a roda parar de responder: delta maximo 300 us para cada lado.
-# USAMOS 300 -- o batente inteiro -- desde 2026-10-04. Os 40 us de folga que
-# estavam aqui para o servo nao forcar custavam 13% do curso, e esses 13% eram
-# a diferenca entre 9% e 22% de reserva de esterco na ponta do oval: com 260 o
-# expert raspava a parede durante o 180 inteiro. Medido: span 260 da um circulo
-# de 125 cm de diametro e span 300 da 107 cm.
+# USAMOS 350 desde 2026-10-04. ATENCAO: o batente exato ainda nao foi fixado --
+# sabemos que esta ENTRE 300 e 350, porque 350 e 400 dao o mesmo circulo de
+# 94 cm. Comandar 350 pode estar forcando contra o limite; assim que o valor
+# visual sair do calibra_servo.py, baixar para ele.
+# Historico: Os 40 us de folga que
+#   span 260 -> circulo 125 cm -> R 0,625 m ->  9% de reserva: o expert travava
+#   span 300 -> circulo 107 cm -> R 0,535 m -> 22% de reserva: dirige, raspa
+#   span 350 -> circulo  94 cm -> R 0,470 m -> 31% de reserva
+# Os 260 originais deixavam 40 us de folga de um batente que, descobriu-se,
+# nem era o batente: havia um fio solto no servo quando ele foi medido.
 # O risco de forcar e aceitavel porque o traçado pede 78% do batente em regime;
 # so transitorio chega ao limite.
 # Antes eram 200, herdados do controle por teclado do controle_teste.py --
@@ -53,9 +58,9 @@ STEER_CENTER_US = 1500
 STEER_SIGN = -1
 
 # us que fisicamente viram cada lado NESTE carro (com o espelho ja aplicado).
-STEER_LEFT_US = 1800
-STEER_RIGHT_US = 1200
-STEER_SPAN_US = 300
+STEER_LEFT_US = 1850
+STEER_RIGHT_US = 1150
+STEER_SPAN_US = 350
 ESC_NEUTRAL_US = 1500
 
 

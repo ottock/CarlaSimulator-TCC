@@ -6,7 +6,7 @@ quando falta dado e que o ESC nunca sai de neutro nesta fase.
 import numpy as np
 import pytest
 
-from ai.car.control_map import ESC_NEUTRAL_US, STEER_CENTER_US
+from ai.car.control_map import ESC_NEUTRAL_US, STEER_CENTER_US, STEER_SPAN_US
 from ai.car.loop import DriveLoop
 
 
@@ -111,7 +111,7 @@ def test_servo_follows_the_model_once_a_revolution_arrives():
     tele = loop.step()                            # o 2o wrap fecha e roda o modelo
     assert tele["has_scan"] is True
     assert tele["steer"] == pytest.approx(0.5)
-    assert kw["actuator"].servo_history[-1] == 1350
+    assert kw["actuator"].servo_history[-1] == STEER_CENTER_US - round(0.5 * STEER_SPAN_US)
 
 
 def test_esc_is_neutral_by_default():
@@ -132,7 +132,7 @@ def test_a_stalled_frame_centres_the_servo():
     loop, kw = _loop(clock=clock, engine=FakeEngine(out=(0.5, 0.4, 0.0)))
     loop.step()
     loop.step()
-    assert kw["actuator"].servo_history[-1] == 1350      # seguindo o modelo
+    assert kw["actuator"].servo_history[-1] == STEER_CENTER_US - round(0.5 * STEER_SPAN_US)      # seguindo o modelo
     tele = loop.step()                                    # gap 0.55 s > 0.25
     assert tele["stalled"] is True
     assert kw["actuator"].servo_history[-1] == STEER_CENTER_US
@@ -220,10 +220,10 @@ class NearLidar(FakeLidar):
 
 
 def test_cruise_drives_the_esc_when_everything_is_healthy():
-    loop, kw = _loop(cruise_us=1650)
+    loop, kw = _loop(cruise_us=STEER_CENTER_US + round(0.5 * STEER_SPAN_US))
     loop.step()
     loop.step()
-    assert kw["actuator"].esc_history[-1] == 1650
+    assert kw["actuator"].esc_history[-1] == STEER_CENTER_US + round(0.5 * STEER_SPAN_US)
 
 
 def test_cruise_is_zero_before_a_complete_revolution():
@@ -231,7 +231,7 @@ def test_cruise_is_zero_before_a_complete_revolution():
     # leria como "livre". Andar com um mapa falso e pior do que ficar parado.
     lidar = FakeLidar()
     lidar.batches = [[(0.0, 2.0), (10.0, 2.0)]]
-    loop, kw = _loop(lidar=lidar, cruise_us=1650)
+    loop, kw = _loop(lidar=lidar, cruise_us=STEER_CENTER_US + round(0.5 * STEER_SPAN_US))
     loop.step()
     assert kw["actuator"].esc_history == [ESC_NEUTRAL_US]
 
@@ -240,7 +240,7 @@ def test_cruise_is_zero_when_the_front_is_blocked():
     # A parada de emergencia e um item de SEGURANCA, nao um comportamento
     # aprendido: a cabeca de freio do modelo esta inerte (dataset com 0% de
     # frenagem), entao parar nao pode depender dela.
-    loop, kw = _loop(lidar=NearLidar(), cruise_us=1650)
+    loop, kw = _loop(lidar=NearLidar(), cruise_us=STEER_CENTER_US + round(0.5 * STEER_SPAN_US))
     loop.step()
     tele = loop.step()
     assert tele["blocked"] is True
@@ -250,19 +250,19 @@ def test_cruise_is_zero_when_the_front_is_blocked():
 def test_a_wall_beside_the_car_does_not_stop_it():
     # Numa pista de 0.53 m as paredes laterais estao SEMPRE perto. Se a parada
     # olhasse o circulo inteiro, o carro nunca sairia do lugar.
-    loop, kw = _loop(cruise_us=1650)          # FakeLidar: 0.5 m em todas as direcoes
+    loop, kw = _loop(cruise_us=STEER_CENTER_US + round(0.5 * STEER_SPAN_US))          # FakeLidar: 0.5 m em todas as direcoes
     loop.step()
     tele = loop.step()
     assert tele["blocked"] is False
-    assert kw["actuator"].esc_history[-1] == 1650
+    assert kw["actuator"].esc_history[-1] == STEER_CENTER_US + round(0.5 * STEER_SPAN_US)
 
 
 def test_cruise_is_zero_on_a_stalled_frame():
     clock = iter([100.0, 100.05, 100.6]).__next__
-    loop, kw = _loop(clock=clock, cruise_us=1650)
+    loop, kw = _loop(clock=clock, cruise_us=STEER_CENTER_US + round(0.5 * STEER_SPAN_US))
     loop.step()
     loop.step()
-    assert kw["actuator"].esc_history[-1] == 1650
+    assert kw["actuator"].esc_history[-1] == STEER_CENTER_US + round(0.5 * STEER_SPAN_US)
     tele = loop.step()
     assert tele["stalled"] is True
     assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US
@@ -332,7 +332,7 @@ def test_a_covered_camera_stops_the_car():
     # Lente tapada devolve quadro, so que uniforme. Antes disso o modelo opinava
     # sobre uma imagem preta e o carro seguia andando.
     preto = np.zeros((720, 1280, 3), dtype=np.uint8)
-    loop, kw = _loop(camera=FakeCamera(frame=preto), cruise_us=1650)
+    loop, kw = _loop(camera=FakeCamera(frame=preto), cruise_us=STEER_CENTER_US + round(0.5 * STEER_SPAN_US))
     loop.step()
     tele = loop.step()
     assert tele["blind"] is True
@@ -349,11 +349,11 @@ def test_a_lidar_that_stops_spinning_stops_the_car():
             return self.batches.pop(0) if self.batches else []
 
     clock = iter([100.0, 100.05, 100.10, 101.0]).__next__
-    loop, kw = _loop(lidar=MudoDepois(), clock=clock, cruise_us=1650)
+    loop, kw = _loop(lidar=MudoDepois(), clock=clock, cruise_us=STEER_CENTER_US + round(0.5 * STEER_SPAN_US))
     loop.step()
     loop.step()
     loop.step()
-    assert kw["actuator"].esc_history[-1] == 1650      # ainda fresco
+    assert kw["actuator"].esc_history[-1] == STEER_CENTER_US + round(0.5 * STEER_SPAN_US)      # ainda fresco
     tele = loop.step()                                 # 0.9 s sem volta nova
     assert tele["stale_lidar"] is True
     assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US

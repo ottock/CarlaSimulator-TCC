@@ -1,4 +1,10 @@
-"""Mapeamento da saida do modelo para o servo do carro (Fase 6b).
+"""Mapa de esterco do carro.
+
+Os valores saem de STEER_SPAN_US de proposito, sem numero fixo: o batente foi
+remedido tres vezes (260 -> 300 -> 350 us, conforme um fio solto apareceu e o
+curso real foi achado) e cada vez quebrava uma duzia de testes que so repetiam
+a constante. O literal fica onde a MEDIDA e o assunto -- em test_steer_scale.
+Mapeamento da saida do modelo para o servo do carro (Fase 6b).
 
 O modelo devolve steer em [-1, 1]; o servo fala microssegundos. Este mapa e o
 ultimo ponto antes do hardware, entao ele tem de ser seguro mesmo recebendo lixo:
@@ -6,6 +12,7 @@ um NaN ou um valor fora de faixa NAO pode virar um comando extremo no servo.
 """
 
 from ai.car.control_map import (
+    STEER_SPAN_US,
     ESC_NEUTRAL_US,
     STEER_CENTER_US,
     STEER_LEFT_US,
@@ -21,16 +28,17 @@ def test_zero_steer_is_centre():
 
 def test_full_right_matches_carla_convention():
     # CARLA: steer +1 = direita. NESTE carro o servo e espelhado (STEER_SIGN),
-    # entao a direita sai em 1200 us -- medido, nao deduzido.
-    assert steer_to_us(1.0) == STEER_RIGHT_US == 1200
+    # entao a direita sai ABAIXO do centro -- medido, nao deduzido.
+    assert steer_to_us(1.0) == STEER_RIGHT_US == STEER_CENTER_US - STEER_SPAN_US
+    assert steer_to_us(1.0) < STEER_CENTER_US
 
 
 def test_full_left():
-    assert steer_to_us(-1.0) == STEER_LEFT_US == 1800
+    assert steer_to_us(-1.0) == STEER_LEFT_US == STEER_CENTER_US + STEER_SPAN_US
 
 
 def test_half_right_is_linear():
-    assert steer_to_us(0.5) == 1350
+    assert steer_to_us(0.5) == STEER_CENTER_US - STEER_SPAN_US // 2
 
 
 def test_out_of_range_is_clamped_not_wrapped():
@@ -165,7 +173,7 @@ def test_front_blocked_is_false_on_a_clear_road():
 # ---------------------------------------------------------------------------
 
 def test_a_wider_span_turns_more_for_the_same_command():
-    assert steer_to_us(-0.4) == 1620                      # padrao +/-300, espelhado
+    assert steer_to_us(-0.4) == STEER_CENTER_US + round(0.4 * STEER_SPAN_US)  # padrao, espelhado
     assert steer_to_us(-0.4, span_us=200) == 1580         # o valor antigo, menor
 
 
@@ -189,12 +197,12 @@ def test_garbage_still_centres_whatever_the_span():
 # ---------------------------------------------------------------------------
 
 def test_negative_steer_turns_the_wheels_left_on_this_car():
-    # 1800 us e o valor que fisicamente vira a esquerda NESTE carro
-    assert steer_to_us(-1.0) == STEER_LEFT_US == 1800
+    # STEER_CENTER + SPAN e o valor que fisicamente vira a esquerda NESTE carro
+    assert steer_to_us(-1.0) == STEER_LEFT_US == STEER_CENTER_US + STEER_SPAN_US
 
 
 def test_positive_steer_turns_the_wheels_right_on_this_car():
-    assert steer_to_us(+1.0) == STEER_RIGHT_US == 1200
+    assert steer_to_us(+1.0) == STEER_RIGHT_US == STEER_CENTER_US - STEER_SPAN_US
 
 
 def test_the_mirror_is_a_single_documented_constant():
