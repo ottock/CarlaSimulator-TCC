@@ -37,6 +37,7 @@
 #   [ + ] / [ - ]   -> zoom do radar (range)
 #   ESC ou Q        -> sair em estado seguro
 
+import argparse
 import sys
 import os
 import time
@@ -93,8 +94,26 @@ STEER_CENTER_US = 1500
 # do control_map.py de proposito: se o controle manual e o do modelo tiverem
 # esterco diferente, comparar os dois deixa de fazer sentido.
 # Espelhado: medido que 1760 us vira a ESQUERDA neste carro (teste_esquerda.py)
-STEER_LEFT_US   = 1760
-STEER_RIGHT_US  = 1240
+# Meia-faixa do servo. 260 deixa 40 us de folga do batente MEDIDO (300), para o
+# servo nao forcar contra o limite. Mede-se outro valor com --span, sem editar o
+# arquivo: editar por sed ja falhou uma vez por causa dos espacos.
+#
+# Para que serve mexer nisso: o raio minimo do carro foi medido com 260 us e deu
+# 62,5 cm. Na ponta do oval isso consome 91% da direcao e nao sobra margem para
+# o controlador corrigir nada. A 300 us o raio deve cair para ~53 cm, o que
+# daria 22% de reserva -- a diferenca entre a pista funcionar e nao funcionar.
+STEER_SPAN_US = 260
+
+_ap = argparse.ArgumentParser(description="Controle manual + radar (TCC)")
+_ap.add_argument("--span", type=int, default=STEER_SPAN_US, metavar="US",
+                 help="meia-faixa do servo em us (padrao %d; o batente medido e 300). "
+                      "Com --span 300 a seta vai ao batente mecanico: nao segure "
+                      "parado muito tempo, o servo forca e esquenta." % STEER_SPAN_US)
+_args = _ap.parse_args()
+STEER_SPAN_US = max(0, min(300, int(_args.span)))
+
+STEER_LEFT_US   = STEER_CENTER_US + STEER_SPAN_US
+STEER_RIGHT_US  = STEER_CENTER_US - STEER_SPAN_US
 
 # --- Limites do ESC (us) - faixa de bancada calibrada (ver MASTER) ---
 THROTTLE_NEUTRO_US = 1500
@@ -448,8 +467,10 @@ def main():
     print("Rampa: {0}".format(
         "LIGADA (suave)" if RAMPA_LIGADA
         else "DESLIGADA - a tecla vai direto ao batente, num quadro"))
-    print("  esterco  centro {0} | esq {1} | dir {2} us".format(
-        STEER_CENTER_US, STEER_LEFT_US, STEER_RIGHT_US))
+    print("  esterco  centro {0} | esq {1} | dir {2} us  (span {3})".format(
+        STEER_CENTER_US, STEER_LEFT_US, STEER_RIGHT_US, STEER_SPAN_US))
+    if STEER_SPAN_US >= 300:
+        print("  ATENCAO: span no batente mecanico. Nao segure a trava parado.")
     print("  throttle neutro {0} | frente {1} | re {2} us".format(
         THROTTLE_NEUTRO_US, THROTTLE_MIN_US, THROTTLE_RE_US))
     if ESC_ARMADO:
