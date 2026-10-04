@@ -120,7 +120,7 @@ def swept_overhang(radius, length, width):
 
 
 def stadium_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
-                 n_points=240):
+                 margin=0.0, n_points=240):
     """Traçado em estadio: duas semicircunferencias ligadas por duas retas.
 
     O maior estadio que cabe, que e tambem o de menor curvatura. Com ``a`` e
@@ -140,6 +140,11 @@ def stadium_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
         centerline: eixo da pista, ``(x, y)`` ou ``(x, y, yaw)``.
         half_width: meia-largura da faixa util, em metros.
         vehicle_width: largura do veiculo.
+        margin: folga EXTRA, em metros, entre a carroceria e a parede. O maior
+            estadio geometricamente possivel encosta no limite, e aí qualquer
+            erro de rastreamento vira raspada: medido, o Pure Pursuit erra 0,37 m
+            em media e o expert tocava a parede em 6% dos quadros. A margem
+            aperta o raio (mais esterco) em troca de espaco para errar.
         vehicle_length: comprimento do veiculo. Zero reproduz o modelo antigo,
             que ignora a varredura -- e foi ele que fez o expert bater.
             Use as medidas do carro REAL escaladas, nao as do veiculo do
@@ -162,7 +167,8 @@ def stadium_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
 
     R = b + folga
     for _ in range(60):                      # varredura depende de R e vice-versa
-        nova = b + (float(half_width) - swept_overhang(R, vehicle_length, vehicle_width))
+        nova = b + (float(half_width) - swept_overhang(R, vehicle_length, vehicle_width)
+                    - float(margin))
         if abs(nova - R) < 1e-9:
             R = nova
             break
@@ -261,7 +267,7 @@ MODOS = ("estadio", "eixo")
 
 
 def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
-                min_radius_required=None, modo="estadio", n_points=240):
+                margin=0.0, min_radius_required=None, modo="estadio", n_points=240):
     """Caminho que o expert deve seguir, com a conferencia que faltava.
 
     ``"eixo"`` devolve a linha de centro -- o comportamento antigo, mantido para
@@ -285,7 +291,8 @@ def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
     else:
         caminho = [tuple(map(float, linha))
                    for linha in stadium_path(centerline, half_width, vehicle_width,
-                                             vehicle_length, n_points=n_points)]
+                                             vehicle_length, margin=margin,
+                                             n_points=n_points)]
 
     if min_radius_required is not None:
         r = min_radius_m([(x, y) for x, y, _ in caminho])

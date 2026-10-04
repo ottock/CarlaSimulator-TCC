@@ -34,7 +34,7 @@
                 "target_speed": 2.0,
                 "lookahead": 4.0,
                 "k_throttle": 0.5,
-                "max_steer_deg": 21.0,
+                "max_steer_deg": 24.1,
                 "espacamento": 0.5,
                 "log": false,
                 "log_every": 1,

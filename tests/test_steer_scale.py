@@ -30,8 +30,10 @@ from ai.steer_scale import (
 
 
 def test_the_measured_car_constants_are_the_ones_we_measured():
-    # 125 cm de diametro tracados no centro do eixo traseiro, trava total.
-    assert CAR_MIN_RADIUS_M == pytest.approx(0.625)
+    # 107 cm de diametro tracados no centro do eixo traseiro, com o curso
+    # INTEIRO do servo (300 us). Com 260 dava 125 cm -- os 40 us de folga que
+    # estavam ali custavam 13% do curso.
+    assert CAR_MIN_RADIUS_M == pytest.approx(0.535)
     assert CAR_WHEELBASE_M == pytest.approx(0.21)
     assert CAR_WIDTH_M == pytest.approx(0.21)     # medido com trena, 36 x 21 cm
     assert LANE_WIDTH_M == pytest.approx(0.56)
@@ -42,7 +44,7 @@ def test_the_radius_is_the_primary_measurement_not_the_angle():
     # Um protractor deu 27 graus, que preveriam 0.412 m -- 34% errado. O carro e
     # 4WD: em trava total as dianteiras arrastam e ele abre. Vale o que ele FAZ.
     equivalente = steer_deg_for_radius(CAR_WHEELBASE_M, CAR_MIN_RADIUS_M)
-    assert equivalente == pytest.approx(18.6, abs=0.1)
+    assert equivalente == pytest.approx(21.4, abs=0.1)
     assert equivalente < 27.0
 
 
@@ -76,10 +78,10 @@ def test_impossible_geometry_raises_instead_of_returning_nonsense():
 
 
 def test_the_sim_angle_matches_the_RADIUS_not_the_angle():
-    # O numero que vai para o CARLA: igualar o raio escalado (0.625 x 12 = 7.5 m)
-    # com o Tesla de 2.875 m de entre-eixos pede ~21.0 graus.
+    # O numero que vai para o CARLA: igualar o raio escalado (0.535 x 12 = 6.42 m)
+    # com o Tesla de 2.875 m de entre-eixos pede ~24.1 graus.
     deg = sim_max_steer_deg()
-    assert deg == pytest.approx(21.0, abs=0.1)
+    assert deg == pytest.approx(24.1, abs=0.1)
 
 
 def test_the_calibrated_sim_reproduces_the_cars_minimum_radius():
@@ -107,7 +109,7 @@ def test_the_measured_car_does_NOT_fit_a_concentric_arc():
     # expert TEM de cortar o apice -- nao e preferencia de traçado.
     assert corner_fits(CAR_MIN_RADIUS_M) is False
     assert max_usable_radius_m() == pytest.approx(0.455, abs=1e-3)
-    assert CAR_MIN_RADIUS_M - max_usable_radius_m() == pytest.approx(0.170, abs=2e-3)
+    assert CAR_MIN_RADIUS_M - max_usable_radius_m() == pytest.approx(0.080, abs=2e-3)
 
 
 def test_the_extra_three_centimetres_of_real_track_help_but_do_not_save_it():

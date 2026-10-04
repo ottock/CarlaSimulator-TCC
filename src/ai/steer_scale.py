@@ -31,12 +31,20 @@ import math
 
 # --- carro real, MEDIDO ---
 #
-# O RAIO e a medida primaria, nao o angulo. Medido em 2026-10-03 tracando a
-# circunferencia do centro do eixo TRASEIRO com trava total: 125 cm de diametro.
+# O RAIO e a medida primaria, nao o angulo. Medido tracando a circunferencia do
+# centro do eixo TRASEIRO com trava total.
+#
+# 2026-10-03, span 260 us: 125 cm de diametro -> R = 0,625 m.
+# 2026-10-04, span 300 us: 107 cm de diametro -> R = 0,535 m.  <-- este vale.
+#
+# Os 260 us vinham do controle por teclado e deixavam 40 us de folga do batente
+# medido (300) para o servo nao forcar. Custaram 13% do curso, e esses 13% eram
+# a diferenca entre 9% e 22% de reserva de esterco na ponta do oval -- ou seja,
+# entre o expert raspar a parede e dirigir. O runtime usa 300 desde entao.
 # Derivar o raio de um angulo de protractor errou 34% (27 graus previam 0.412 m),
 # porque o protractor mede a geometria parada e o carro e 4WD -- em trava total as
 # dianteiras arrastam e ele abre. O que vale e o que o carro FAZ.
-CAR_MIN_RADIUS_M = 0.625
+CAR_MIN_RADIUS_M = 0.535
 CAR_WHEELBASE_M = 0.21          # usado so para relatar o angulo equivalente
 # 36 x 21 cm MEDIDOS no carro (o catalogo diz 35,6 x 20,8; vale a trena).
 CAR_LENGTH_M = 0.36

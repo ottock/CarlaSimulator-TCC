@@ -21,16 +21,16 @@ def test_zero_steer_is_centre():
 
 def test_full_right_matches_carla_convention():
     # CARLA: steer +1 = direita. NESTE carro o servo e espelhado (STEER_SIGN),
-    # entao a direita sai em 1240 us -- medido, nao deduzido.
-    assert steer_to_us(1.0) == STEER_RIGHT_US == 1240
+    # entao a direita sai em 1200 us -- medido, nao deduzido.
+    assert steer_to_us(1.0) == STEER_RIGHT_US == 1200
 
 
 def test_full_left():
-    assert steer_to_us(-1.0) == STEER_LEFT_US == 1760
+    assert steer_to_us(-1.0) == STEER_LEFT_US == 1800
 
 
 def test_half_right_is_linear():
-    assert steer_to_us(0.5) == 1370
+    assert steer_to_us(0.5) == 1350
 
 
 def test_out_of_range_is_clamped_not_wrapped():
@@ -159,13 +159,13 @@ def test_front_blocked_is_false_on_a_clear_road():
 # Faixa do servo ajustavel (2026-09-12)
 #
 # Os 1300/1700 vieram do controle por teclado e eram conservadores. Medido no
-# carro (calibra_servo.py, 2026-09-12): o batente real e +/-300 us; usamos 260, com folga. Como o modelo
+# carro (calibra_servo.py, 2026-09-12): o batente real e +/-300 us; usamos 300, com folga. Como o modelo
 # aprendeu steer=+/-1 significando BATENTE TOTAL, mapear +/-1 para uma faixa
 # menor que a real corta todo comando de esterco proporcionalmente.
 # ---------------------------------------------------------------------------
 
 def test_a_wider_span_turns_more_for_the_same_command():
-    assert steer_to_us(-0.4) == 1604                      # padrao +/-260, espelhado
+    assert steer_to_us(-0.4) == 1620                      # padrao +/-300, espelhado
     assert steer_to_us(-0.4, span_us=200) == 1580         # o valor antigo, menor
 
 
@@ -189,12 +189,12 @@ def test_garbage_still_centres_whatever_the_span():
 # ---------------------------------------------------------------------------
 
 def test_negative_steer_turns_the_wheels_left_on_this_car():
-    # 1760 us e o valor que fisicamente vira a esquerda NESTE carro
-    assert steer_to_us(-1.0) == STEER_LEFT_US == 1760
+    # 1800 us e o valor que fisicamente vira a esquerda NESTE carro
+    assert steer_to_us(-1.0) == STEER_LEFT_US == 1800
 
 
 def test_positive_steer_turns_the_wheels_right_on_this_car():
-    assert steer_to_us(+1.0) == STEER_RIGHT_US == 1240
+    assert steer_to_us(+1.0) == STEER_RIGHT_US == 1200
 
 
 def test_the_mirror_is_a_single_documented_constant():

@@ -23,7 +23,7 @@ from ai.racing_line import (
 
 CARRO_SIM_M = 0.21 * 12       # largura do WLtoys na escala do simulador
 COMP_SIM_M = 0.36 * 12        # comprimento
-RAIO_CARRO_SIM_M = 0.625 * 12  # 7,5 m -- o raio minimo medido, escalado
+RAIO_CARRO_SIM_M = 0.535 * 12  # 6,42 m -- raio minimo medido com o curso inteiro
 
 
 def _circulo(r, n=120):

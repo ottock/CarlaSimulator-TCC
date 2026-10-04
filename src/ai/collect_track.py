@@ -66,7 +66,7 @@ def _lidar_points(obs):
     return np.zeros((0, 3), dtype=np.float32)
 
 
-def _trajeto_do_expert(modo, centerline, track_cfg):
+def _trajeto_do_expert(modo, centerline, track_cfg, margem):
     """Caminho que o Pure Pursuit vai perseguir, ja conferido contra o carro.
 
     O eixo da pista exige raio de 3,18 m e o carro faz 7,50 (0,625 medidos x12).
@@ -77,6 +77,7 @@ def _trajeto_do_expert(modo, centerline, track_cfg):
     caminho = expert_path(centerline, half_width=half,
                           vehicle_width=CAR_WIDTH_M * SCALE,
                           vehicle_length=CAR_LENGTH_M * SCALE,
+                          margin=margem,
                           min_radius_required=CAR_MIN_RADIUS_M * SCALE,
                           modo=modo)
     logger.info("Traçado '%s': raio minimo %.2f m (carro faz %.2f) | %d pontos",
@@ -107,7 +108,7 @@ def _teleport_offcenter_track(vehicle, centerline, rng, max_lat, max_yaw, z):
 def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=60.0,
                   launch=True, quality="Low", recovery=False, recovery_every=5.0,
                   recovery_lat=0.8, recovery_yaw=18.0, recovery_min_speed=1.0, seed=0,
-                  tracado="estadio"):
+                  tracado="estadio", margem=0.0):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -125,7 +126,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         "escala": track_cfg0.get("escala"),
         "camera": actor_cfg.get("camera", {}),
         "lidar_sectors": {"n_sectors": LIDAR_N_SECTORS, "max_range_m": LIDAR_MAX_RANGE_M},
-        "tracado": tracado,
+        "tracado": tracado, "margem_parede_m": margem,
         "recovery": ({"every_s": recovery_every, "lat_m": recovery_lat, "yaw_deg": recovery_yaw}
                      if recovery else None),
         "label_columns": LABEL_COLUMNS,
@@ -162,7 +163,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                 # 3,18 m e o carro faz 7,50 (0,625 medidos x12): seguir o eixo
                 # sempre foi impossivel, e e disso que vinha o subesterco. O eixo
                 # continua servindo para medir desvio -- ele e o meio da faixa.
-                trajeto = _trajeto_do_expert(tracado, centerline, track_cfg)
+                trajeto = _trajeto_do_expert(tracado, centerline, track_cfg, margem)
 
                 # Nasce no EIXO, nao no traçado: o traçado encosta no limite do
                 # corredor e o CARLA recusa o spawn por colisao com a parede. O
@@ -264,6 +265,10 @@ def main():
                    help="Caminho do expert. 'estadio' e a linha que o carro "
                         "consegue executar; 'eixo' e a linha de centro, que "
                         "este carro NAO consegue seguir em curva nenhuma.")
+    p.add_argument("--margem", type=float, default=0.0, metavar="M",
+                   help="folga extra do traçado ate a parede, em metros de "
+                        "simulador. 0 usa o corredor inteiro e o expert raspa: "
+                        "o Pure Pursuit erra 0,37 m em media.")
     p.add_argument("--recovery", action="store_true")
     p.add_argument("--recovery-every", type=float, default=5.0)
     p.add_argument("--recovery-lat", type=float, default=0.8)
@@ -281,7 +286,7 @@ def main():
         episodes_por_pista=a.episodes_por_pista, seconds=a.seconds,
         launch=not a.no_launch, quality=a.quality, recovery=a.recovery,
         recovery_every=a.recovery_every, recovery_lat=a.recovery_lat,
-        recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado)
+        recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado, margem=a.margem)
 
 
 if __name__ == "__main__":

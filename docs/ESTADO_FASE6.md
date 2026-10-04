@@ -232,3 +232,35 @@ precisa aprender.
 
 **Próximo passo:** gerar o caminho do expert com esse arco no lugar do arco da linha
 de centro, re-verificar, e só então recoletar e retreinar.
+
+### O curso do servo que faltava (2026-10-04)
+
+O `controle_teste` comandava **±260 µs** de um batente medido de **±300** — 40 µs
+de folga para o servo não forçar. Esses 13% de curso custavam caro:
+
+| span | diâmetro do círculo | raio | reserva de esterço na ponta do oval |
+|---|---|---|---|
+| 260 µs | 125 cm | 0,625 m | **9%** — o expert raspava a parede e travava |
+| **300 µs** | **107 cm** | **0,535 m** | **22%** — dirige |
+
+Com isso o `max_steer_deg` do simulador passa de 21,0 para **24,1°** e o
+`STEER_SPAN_US` do carro de 260 para **300**.
+
+**Verificação no CARLA, `oval_tcc`, 120 s:**
+
+| configuração | voltas | v | parado | encosta na parede |
+|---|---|---|---|---|
+| **alvo 2,0 m/s, Ld 4,0, margem 0** | **3,57** | 1,74 | 0,4% | 6,0% |
+| alvo 1,0 m/s, Ld 4,0 | 0,56 | 0,27 | 68,5% | 68,8% |
+| alvo 2,0 m/s, Ld 6,0 | 0,56 | 0,27 | 84,9% | 85,6% |
+| alvo 2,0, Ld 4,0, margem 0,5 m | 1,10 | 0,53 | 69,1% | — |
+
+Dois resultados contra a intuição. **Margem de parede piora**: mais margem é raio
+menor, que é mais esterço, que é menos reserva — o gargalo é autoridade de
+direção, não espaço lateral. E **mais devagar piora**: a 1,0 m/s o controlador de
+acelerador não vence o arrasto das dianteiras em esterço alto.
+
+Pendência conhecida: o expert ainda **toca a parede externa em 6% dos quadros**
+(mínimo −0,24 m). Ele completa as voltas, mas o traçado tem degrau de curvatura
+na entrada do arco e o Pure Pursuit sai por fora ali. Uma transição em clotoide
+resolveria.
