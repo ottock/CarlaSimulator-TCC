@@ -301,3 +301,38 @@ O descasamento de velocidade que importa não é a amplitude do esterço; é qua
 carro anda **às cegas entre duas decisões**: 6,7 cm no carro (1,0 m/s a 15 Hz)
 contra 0,73 cm equivalentes no treino, e nesses 6,7 cm o rumo muda 5,7°. A alavanca
 para isso é o **FPS do Jetson**, não a velocidade do simulador.
+
+### Modelo do oval — `driving_oval_v1` (2026-10-04)
+
+**Dataset `dataset_oval_v1`:** 12 episódios, 14.400 quadros, 30% recuperação,
+1,74 m/s, zero quadros fora da pista.
+
+Dois consertos na coleta, os dois medidos:
+
+**Recuperação por ruído, não por teleporte.** O teleporte trava o carro nesta
+pista: o ep0 ficou 54% parado e os seis seguintes 100% parados — 8.400 quadros de
+carro imóvel. `set_transform` mantém a velocidade antiga enquanto troca a pose, e
+um Tesla de 4,7 m atravessado numa faixa de 6,36 encrava. O `SteeringNoiseInjector`
+(já existente desde a Fase 2) perturba o esterço **aplicado** e grava o comando
+**limpo** como rótulo: o carro deriva por física, nunca em pose impossível.
+
+**Espelho horizontal no treino.** O oval tem as quatro curvas para o mesmo lado:
+14.364 quadros negativos contra 36 positivos. Dirigir o oval ao contrário foi
+tentado e quebrou (o carro trava na partida), então a flag foi removida. O espelho
+inverte imagem, LiDAR e sinal do esterço em metade das amostras de treino —
+simetria exata, sem simulação. Resultado: 50/50, média +0,001.
+
+**Treino:** 40 épocas, parada antecipada na 34. MAE s/t/b = **0,0316**/0,0057/0,0029,
+var_ratio 1,02. Na Fase 4 o MAE de esterço era 0,039–0,043.
+
+**Malha fechada, 120 s:** `mean_dev=0,83 m p95=1,71 max=1,82 offlane=0
+collisions=0` → **1/1 limpa**. O desvio é medido contra o eixo e o traçado fica a
+até 1,93 m dele por construção, então esse número **não é comparável** com os da
+Fase 4.
+
+**Ablação do LiDAR: também 1/1 limpa.** Nesta pista o LiDAR não contribui — a
+câmera dirige sozinha. Na Fase 4 a ablação dava 0/3 e era o argumento que defendia
+a escolha dual. Aqui não dá. Converge com o que o carro real mostrou: o feixe passa
+por cima das paredes de isopor, então no asfalto ele também não contribui.
+
+**ONNX:** opset 11, 1,9 MB, paridade 5,07e-07, `onnx.checker` OK. Em `models/`.

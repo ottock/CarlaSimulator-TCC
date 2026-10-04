@@ -253,11 +253,22 @@ def apply_max_steer_angle(vehicle, max_steer_deg: float) -> float:
     pc.wheels = rodas            # a lista e copia: reatribuir e obrigatorio
     vehicle.apply_physics_control(pc)
 
-    conferido = vehicle.get_physics_control().wheels[idx[0]].max_steer_angle
-    if abs(conferido - float(max_steer_deg)) > 0.1:
+    # apply_physics_control e ASSINCRONO: em modo sincrono o servidor so aplica
+    # no proximo tick, e reler na hora devolve o valor velho. Isso passou na
+    # coleta por sorte de temporizacao e reprovou na avaliacao com a mesma
+    # chamada -- entao conferimos com tick e algumas tentativas antes de falhar.
+    conferido = None
+    mundo = vehicle.get_world()
+    for _ in range(10):
+        conferido = vehicle.get_physics_control().wheels[idx[0]].max_steer_angle
+        if abs(conferido - float(max_steer_deg)) <= 0.1:
+            break
+        mundo.tick()
+    if conferido is None or abs(conferido - float(max_steer_deg)) > 0.1:
         raise RuntimeError(
             "o CARLA nao aceitou o limite de esterco: pedi {0:.1f} graus e li "
-            "{1:.1f} de volta".format(float(max_steer_deg), conferido))
+            "{1:.1f} de volta depois de 10 ticks".format(
+                float(max_steer_deg), conferido))
     logger.info("Esterco limitado: %.1f -> %.1f graus nas rodas %s",
                 antes, conferido, idx)
     return conferido
