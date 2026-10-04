@@ -241,3 +241,71 @@ def test_the_corrected_path_is_still_drivable_by_the_car():
     eixo, half = _oval()
     p = stadium_path(eixo, half, CARRO_SIM_M, COMP_SIM_M)
     assert min_radius_m(p[:, :2]) >= RAIO_CARRO_SIM_M
+
+
+# ---------------------------------------------------------------------------
+# Empurrao de recuperacao: o espaco e assimetrico
+# ---------------------------------------------------------------------------
+
+from ai.racing_line import nudge_bounds, signed_offsets
+
+
+def test_the_room_around_the_racing_line_is_asymmetric():
+    # O traçado encosta num lado do corredor, entao quase todo o espaco sobra
+    # do outro. Tratar como simetrico foi o que pos a carroceria na parede.
+    lo, hi = nudge_bounds(path_offset=1.93, half_width=3.18, vehicle_width=2.0)
+    assert hi == pytest.approx(0.25, abs=0.01)
+    assert lo == pytest.approx(-4.11, abs=0.01)
+
+
+def test_a_path_on_the_centerline_has_symmetric_room():
+    lo, hi = nudge_bounds(0.0, half_width=3.18, vehicle_width=2.0)
+    assert lo == pytest.approx(-hi)
+
+
+def test_the_bounds_keep_the_body_inside_the_lane():
+    half, veh = 3.18, 2.0
+    for s in (-2.0, -0.5, 0.0, 1.5, 1.93):
+        lo, hi = nudge_bounds(s, half, veh)
+        for delta in (lo, hi):
+            assert abs(s + delta) <= half - veh / 2 + 1e-9
+
+
+def test_a_vehicle_wider_than_the_lane_is_refused():
+    with pytest.raises(ValueError):
+        nudge_bounds(0.0, half_width=0.5, vehicle_width=2.0)
+
+
+def test_signed_offsets_say_which_SIDE_not_just_how_far():
+    eixo, half = _oval()
+    p = stadium_path(eixo, half, CARRO_SIM_M, COMP_SIM_M)
+    s = signed_offsets(p[:, :2], eixo)
+    # O estadio fica todo de um lado do eixo: mesmo sinal em todo lugar.
+    assert (s > 0).all() or (s < 0).all()
+    assert np.abs(s).max() == pytest.approx(
+        np.abs(signed_offsets(p[:, :2], eixo)).max())
+
+
+def test_lateral_offset_is_signed_and_matches_the_normal():
+    from ai.racing_line import lateral_offset
+    eixo, _ = _oval()
+    c0 = eixo[0]
+    s, n = lateral_offset(c0[0], c0[1], eixo)
+    assert s == pytest.approx(0.0, abs=1e-6)        # no proprio eixo
+    # um metro na direcao da normal da deslocamento +1
+    s2, _ = lateral_offset(c0[0] + n[0], c0[1] + n[1], eixo)
+    assert s2 == pytest.approx(1.0, abs=0.05)
+
+
+def test_the_nudge_displaces_from_where_the_car_IS():
+    # O bug que custou duas rodadas: empurrar a partir do TRACADO teleportava o
+    # carro ate la antes de somar o deslocamento. No inicio do episodio ele
+    # esta no eixo, a 1,9 m do traçado, e um "empurrao de 0,6" virava um salto
+    # de 1,4 m que punha a carroceria 25 cm dentro da parede.
+    from ai.racing_line import lateral_offset, nudge_bounds
+    eixo, half = _oval()
+    c0 = eixo[0]
+    s, _ = lateral_offset(c0[0], c0[1], eixo)
+    lo, hi = nudge_bounds(s, half, CARRO_SIM_M)
+    # a partir do eixo o espaco e simetrico, e um empurrao de 0,6 cabe nos dois
+    assert lo <= -0.6 and hi >= 0.6

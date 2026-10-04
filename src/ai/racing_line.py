@@ -47,6 +47,17 @@ def _sem_ponto_repetido(pts):
     return pts
 
 
+def _normals(pts):
+    """Normal unitaria a esquerda em cada ponto de um caminho FECHADO."""
+    prox = np.roll(pts, -1, axis=0)
+    ant = np.roll(pts, 1, axis=0)
+    tang = prox - ant
+    comp = np.hypot(tang[:, 0], tang[:, 1])
+    comp[comp < 1e-12] = 1.0
+    tang = tang / comp[:, None]
+    return np.stack([-tang[:, 1], tang[:, 0]], axis=1)
+
+
 def menger_curvature(p0, p1, p2):
     """Curvatura do circulo que passa pelos tres pontos: ``4A / (a*b*c)``.
 
@@ -302,3 +313,57 @@ def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
                 "assim ensinaria de novo uma trajetoria inexecutavel"
                 % (modo, r, float(min_radius_required)))
     return caminho
+
+
+def signed_offsets(path, centerline):
+    """Deslocamento COM SINAL de cada ponto do caminho em relacao ao eixo.
+
+    Positivo no sentido da normal esquerda do eixo. Precisa ser com sinal (e
+    nao a distancia) porque o espaco que sobra de cada lado e assimetrico: o
+    traçado encosta num lado do corredor e deixa quase tudo no outro.
+    """
+    c = _sem_ponto_repetido(_xy(centerline))
+    nrm = _normals(c)
+    p = _xy(path)
+    out = np.empty(len(p))
+    for i, q in enumerate(p):
+        j = int(np.argmin(np.hypot(c[:, 0] - q[0], c[:, 1] - q[1])))
+        out[i] = float(np.dot(q - c[j], nrm[j]))
+    return out
+
+
+def nudge_bounds(path_offset, half_width, vehicle_width):
+    """Quanto da para empurrar o carro para cada lado, a partir do traçado.
+
+    MEDIDO 2026-10-04: empurrar a partir do EIXO arrancava o carro 1,93 m de
+    lado antes mesmo de somar o deslocamento, porque e no traçado que ele
+    dirige. Com 1,2 m de empurrao davam 3,13 m e a carroceria entrava na
+    parede -- o ep0 ficou 54% parado e os seis seguintes 100% parados.
+
+    Aqui o empurrao e relativo ao TRACADO e limitado pelo corredor de cada
+    lado. No oval isso da ~0,25 m para fora e ~4,1 m para dentro: a assimetria
+    e real, e e o lado de dentro que importa, porque quem deriva para FORA bate
+    e nao ha estado recuperavel la.
+
+    Returns:
+        ``(minimo, maximo)`` do deslocamento, no mesmo sinal de ``path_offset``.
+    """
+    lim = float(half_width) - float(vehicle_width) / 2.0
+    if lim <= 0.0:
+        raise ValueError("corredor util vazio para um veiculo de %.2f m numa faixa "
+                         "de %.2f m" % (float(vehicle_width), 2 * float(half_width)))
+    s = float(path_offset)
+    return (-lim - s, lim - s)
+
+
+def lateral_offset(x, y, centerline):
+    """``(deslocamento_com_sinal, normal)`` do ponto em relacao ao eixo.
+
+    A normal e a do vertice mais proximo, apontando para a esquerda do sentido
+    de marcha. Serve para deslocar um ponto lateralmente sem sair do corredor.
+    """
+    c = _sem_ponto_repetido(_xy(centerline))
+    nrm = _normals(c)
+    j = int(np.argmin(np.hypot(c[:, 0] - float(x), c[:, 1] - float(y))))
+    d = np.array([float(x) - c[j][0], float(y) - c[j][1]])
+    return float(np.dot(d, nrm[j])), nrm[j]

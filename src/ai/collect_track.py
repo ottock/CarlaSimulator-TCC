@@ -37,7 +37,8 @@ from ai.noise import SteeringNoiseInjector
 from ai.recovery_schedule import RecoveryScheduler
 from ai.report import dataset_report, print_report
 from ai.sim_lidar import points_to_sectors_m
-from ai.racing_line import MODOS, expert_path, min_radius_m
+from ai.racing_line import (MODOS, expert_path, lateral_offset, min_radius_m,
+                            nudge_bounds)
 from ai.steer_scale import CAR_LENGTH_M, CAR_MIN_RADIUS_M, CAR_WIDTH_M, SCALE
 from ai.track_ref import track_centerline, track_width, deviation_from_centerline
 from ai.eval_closedloop import _launch_server, _terminate_server, _speed_ms, read_observation
@@ -87,6 +88,43 @@ def _trajeto_do_expert(modo, centerline, track_cfg, margem):
     return caminho
 
 
+def _empurrao(vehicle, centerline, half_width, veh_width, rng, max_yaw, max_lat):
+    """Desloca o ego lateralmente A PARTIR DE ONDE ELE ESTA, dentro do corredor.
+
+    Duas versoes anteriores erraram o mesmo ponto por lados opostos, e as duas
+    travaram o carro:
+
+      - a partir do EIXO: o carro dirige o traçado, a 1,93 m dali, entao ele era
+        arrancado 1,93 m de lado antes de somar o deslocamento;
+      - a partir do TRACADO: no inicio do episodio o carro ainda esta no eixo,
+        entao um "empurrao de 0,6" virou um salto medido de 1,4 m que deixou a
+        carroceria 25 cm DENTRO da parede.
+
+    Deslocar a partir da posicao atual torna o empurrao exatamente o que diz
+    ser. O rumo e preservado (so uma guinada pequena por cima), entao a
+    velocidade continua alinhada com o carro e nao ha derrapagem instantanea.
+    """
+    tf = vehicle.get_transform()
+    loc = tf.location
+    atual, normal = lateral_offset(loc.x, loc.y, centerline)
+    lo, hi = nudge_bounds(atual, half_width, veh_width)
+    # 20 cm de margem das paredes -- o limite exato deixa a carroceria encostada --
+    # e um teto de magnitude: o corredor sozinho permitiria metros, e um carro de
+    # 4,7 m atirado longe numa curva fechada encosta de qualquer jeito.
+    lo = max(lo + 0.20, -float(max_lat))
+    hi = min(hi - 0.20, float(max_lat))
+    if hi <= lo:
+        return False
+    lat = rng.uniform(lo, hi)
+    yaw = rng.choice((-1.0, 1.0)) * rng.uniform(2.0, max_yaw) if max_yaw > 2.0 else 0.0
+    vehicle.set_transform(carla.Transform(
+        carla.Location(x=loc.x + float(normal[0]) * lat,
+                       y=loc.y + float(normal[1]) * lat, z=loc.z),
+        carla.Rotation(pitch=tf.rotation.pitch, yaw=tf.rotation.yaw + yaw,
+                       roll=tf.rotation.roll)))
+    return True
+
+
 def _teleport_offcenter_track(vehicle, centerline, rng, max_lat, max_yaw, z):
     """Cutuca o ego pra fora do centro, relativo a linha de centro (nao a get_waypoint).
 
@@ -108,9 +146,9 @@ def _teleport_offcenter_track(vehicle, centerline, rng, max_lat, max_yaw, z):
 
 def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=60.0,
                   launch=True, quality="Low", recovery=False, recovery_every=5.0,
-                  recovery_lat=0.8, recovery_yaw=18.0, recovery_min_speed=1.0, seed=0,
+                  recovery_lat=0.9, recovery_yaw=6.0, recovery_min_speed=1.0, seed=0,
                   tracado="estadio", margem=0.0, recovery_amp=0.2,
-                  teleporte=False):
+                  empurrar=True):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -129,7 +167,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         "camera": actor_cfg.get("camera", {}),
         "lidar_sectors": {"n_sectors": LIDAR_N_SECTORS, "max_range_m": LIDAR_MAX_RANGE_M},
         "tracado": tracado, "margem_parede_m": margem,
-        "recovery_modo": ("teleporte" if teleporte else "ruido"),
+        "recovery_modo": ("ruido+empurrao" if empurrar else "ruido"),
         "recovery_amp": recovery_amp,
         "recovery": ({"every_s": recovery_every, "lat_m": recovery_lat, "yaw_deg": recovery_yaw}
                      if recovery else None),
@@ -221,17 +259,11 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     try:
                         for step in range(steps_per_ep):
                             moving = _speed_ms(ego) >= recovery_min_speed
-                            if teleporte and sched.should_teleport(step, moving):
-                                # Cutuca a partir do EIXO, nao do traçado. O
-                                # traçado ja encosta no limite do corredor: somar
-                                # um empurrao para fora dele poe a carroceria na
-                                # parede. A partir do eixo a perturbacao cobre a
-                                # faixa inteira com folga dos dois lados, e o
-                                # Pure Pursuit traz de volta AO TRACADO -- que e
-                                # exatamente o exemplo de recuperacao que a rede
-                                # precisa.
-                                _teleport_offcenter_track(ego, centerline, rng,
-                                                          recovery_lat, recovery_yaw, z_spawn)
+                            if empurrar and sched.should_teleport(step, moving):
+                                _empurrao(ego, centerline,
+                                          track_width(track_cfg) / 2.0,
+                                          CAR_WIDTH_M * SCALE, rng, recovery_yaw,
+                                          recovery_lat)
                                 sched.mark(step)
 
                             tf = ego.get_transform()
@@ -252,7 +284,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
 
                             obs = read_observation(ego, sensors)
                             dev, _ = deviation_from_centerline(centerline, tf.location.x, tf.location.y)
-                            recovering = ruidando or (teleporte and sched.is_recovering(step))
+                            recovering = ruidando or (empurrar and sched.is_recovering(step))
                             if obs["image"] is not None and dev <= lim_fora:
                                 lidar_m = points_to_sectors_m(
                                     _lidar_points(obs), n_sectors=LIDAR_N_SECTORS,
@@ -304,13 +336,14 @@ def main():
     p.add_argument("--recovery", action="store_true")
     p.add_argument("--recovery-amp", type=float, default=0.2, metavar="A",
                    help="amplitude do ruido de esterco (so com --recovery)")
-    p.add_argument("--teleporte", action="store_true",
-                   help="recupera por TELEPORTE em vez de ruido. Medido: nesta "
-                        "pista o teleporte trava o carro e o episodio inteiro "
-                        "vira quadros parados.")
+    p.add_argument("--sem-empurrao", action="store_true",
+                   help="so ruido de esterco, sem reposicionar o ego. Medido: so "
+                        "o ruido cobre +/-1,4 cm na escala do carro, insuficiente "
+                        "para ensinar recuperacao numa faixa de 53 cm.")
     p.add_argument("--recovery-every", type=float, default=5.0)
-    p.add_argument("--recovery-lat", type=float, default=0.8)
-    p.add_argument("--recovery-yaw", type=float, default=18.0)
+    p.add_argument("--recovery-lat", type=float, default=0.9,
+                   help="teto do empurrao lateral, em metros de simulador")
+    p.add_argument("--recovery-yaw", type=float, default=8.0)
     p.add_argument("--seed", type=int, default=0)
     a = p.parse_args()
 
@@ -325,7 +358,7 @@ def main():
         launch=not a.no_launch, quality=a.quality, recovery=a.recovery,
         recovery_every=a.recovery_every, recovery_lat=a.recovery_lat,
         recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado, margem=a.margem,
-        recovery_amp=a.recovery_amp, teleporte=a.teleporte)
+        recovery_amp=a.recovery_amp, empurrar=not a.sem_empurrao)
 
 
 if __name__ == "__main__":
