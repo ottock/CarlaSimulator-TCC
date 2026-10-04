@@ -70,7 +70,7 @@ def _lidar_points(obs):
 def _trajeto_do_expert(modo, centerline, track_cfg, margem):
     """Caminho que o Pure Pursuit vai perseguir, ja conferido contra o carro.
 
-    O eixo da pista exige raio de 3,18 m e o carro faz 7,50 (0,625 medidos x12).
+    O eixo da pista exige raio de 3,18 m e o carro faz 5,64 (0,470 medidos x12).
     Seguir o eixo sempre foi impossivel -- e daí veio o subesterco em tudo. A
     conferencia aqui recusa coletar de novo sobre um caminho inexecutavel.
     """

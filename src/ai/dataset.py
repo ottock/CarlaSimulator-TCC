@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import Dataset
 
 from ai.augment import photometric_jitter
+from ai.mirror import mirror_lidar
 from ai.shared.image_pipeline import preprocess
 
 
@@ -46,12 +47,17 @@ class DrivingDataset(Dataset):
     without recollecting. ``None`` = no mask (the Fase 4 behaviour).
     """
 
-    def __init__(self, index, max_range=12.0, fov_deg=None, photometric=False):
+    def __init__(self, index, max_range=12.0, fov_deg=None, photometric=False,
+                 mirror=False):
         self.index = index
         # Aumento fotometrico: SO no split de treino. Na validacao ele tornaria
         # o val_MAE incomparavel com as fases anteriores e mediria o aumento,
         # nao o modelo.
         self.photometric = photometric
+        # Espelho horizontal (ver ai.mirror). O oval vira so para um lado --
+        # 14.364 quadros negativos contra 36 positivos -- e sem isto a rede
+        # aprende 'sempre vire para a esquerda'. So no split de treino.
+        self.mirror = mirror
         self.max_range = max_range
         self.fov_deg = fov_deg
         self._lidar_cache = {}
@@ -81,5 +87,12 @@ class DrivingDataset(Dataset):
         if self.fov_deg is not None:
             sectors_m = apply_fov_mask(sectors_m, self.fov_deg, self.max_range)
         lidar = normalize_sectors_m(sectors_m, self.max_range)
-        target = np.array([rec["steer"], rec["throttle"], rec["brake"]], dtype=np.float32)
+        steer = rec["steer"]
+        if self.mirror and np.random.default_rng().random() < 0.5:
+            # Espelha DEPOIS do preprocess: x e (3, 66, 200), entao o eixo da
+            # largura e o -1. Inverter antes exigiria repetir o crop e o resize.
+            x = x[:, :, ::-1].copy()
+            lidar = mirror_lidar(lidar)
+            steer = -steer
+        target = np.array([steer, rec["throttle"], rec["brake"]], dtype=np.float32)
         return torch.from_numpy(x), torch.from_numpy(lidar), torch.from_numpy(target)
