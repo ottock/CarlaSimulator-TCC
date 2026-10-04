@@ -36,6 +36,8 @@ from ai.dataset_writer import EpisodeWriter, write_meta, LABEL_COLUMNS
 from ai.recovery_schedule import RecoveryScheduler
 from ai.report import dataset_report, print_report
 from ai.sim_lidar import points_to_sectors_m
+from ai.racing_line import MODOS, expert_path, min_radius_m
+from ai.steer_scale import CAR_LENGTH_M, CAR_MIN_RADIUS_M, CAR_WIDTH_M, SCALE
 from ai.track_ref import track_centerline, track_width, deviation_from_centerline
 from ai.eval_closedloop import _launch_server, _terminate_server, _speed_ms, read_observation
 from core.carlaClient.track_builder import build_track
@@ -64,6 +66,25 @@ def _lidar_points(obs):
     return np.zeros((0, 3), dtype=np.float32)
 
 
+def _trajeto_do_expert(modo, centerline, track_cfg):
+    """Caminho que o Pure Pursuit vai perseguir, ja conferido contra o carro.
+
+    O eixo da pista exige raio de 3,18 m e o carro faz 7,50 (0,625 medidos x12).
+    Seguir o eixo sempre foi impossivel -- e daí veio o subesterco em tudo. A
+    conferencia aqui recusa coletar de novo sobre um caminho inexecutavel.
+    """
+    half = track_width(track_cfg) / 2.0
+    caminho = expert_path(centerline, half_width=half,
+                          vehicle_width=CAR_WIDTH_M * SCALE,
+                          vehicle_length=CAR_LENGTH_M * SCALE,
+                          min_radius_required=CAR_MIN_RADIUS_M * SCALE,
+                          modo=modo)
+    logger.info("Traçado '%s': raio minimo %.2f m (carro faz %.2f) | %d pontos",
+                modo, min_radius_m([(x, y) for x, y, _ in caminho]),
+                CAR_MIN_RADIUS_M * SCALE, len(caminho))
+    return caminho
+
+
 def _teleport_offcenter_track(vehicle, centerline, rng, max_lat, max_yaw, z):
     """Cutuca o ego pra fora do centro, relativo a linha de centro (nao a get_waypoint).
 
@@ -85,7 +106,8 @@ def _teleport_offcenter_track(vehicle, centerline, rng, max_lat, max_yaw, z):
 
 def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=60.0,
                   launch=True, quality="Low", recovery=False, recovery_every=5.0,
-                  recovery_lat=0.8, recovery_yaw=18.0, recovery_min_speed=1.0, seed=0):
+                  recovery_lat=0.8, recovery_yaw=18.0, recovery_min_speed=1.0, seed=0,
+                  tracado="estadio"):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -103,6 +125,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         "escala": track_cfg0.get("escala"),
         "camera": actor_cfg.get("camera", {}),
         "lidar_sectors": {"n_sectors": LIDAR_N_SECTORS, "max_range_m": LIDAR_MAX_RANGE_M},
+        "tracado": tracado,
         "recovery": ({"every_s": recovery_every, "lat_m": recovery_lat, "yaw_deg": recovery_yaw}
                      if recovery else None),
         "label_columns": LABEL_COLUMNS,
@@ -135,7 +158,15 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                 build_track(world, track_cfg, pista_actors)
                 centerline = track_centerline(track_cfg)
                 lim_fora = track_width(track_cfg)   # desvio > largura util = fora da pista
+                # O expert segue o TRACADO, nao o eixo. O eixo da curva pede raio
+                # 3,18 m e o carro faz 7,50 (0,625 medidos x12): seguir o eixo
+                # sempre foi impossivel, e e disso que vinha o subesterco. O eixo
+                # continua servindo para medir desvio -- ele e o meio da faixa.
+                trajeto = _trajeto_do_expert(tracado, centerline, track_cfg)
 
+                # Nasce no EIXO, nao no traçado: o traçado encosta no limite do
+                # corredor e o CARLA recusa o spawn por colisao com a parede. O
+                # Pure Pursuit converge para o traçado nos primeiros metros.
                 x0, y0, yaw0 = centerline[0]
                 spawn_tf = carla.Transform(carla.Location(x0, y0, z_spawn),
                                            carla.Rotation(yaw=math.degrees(yaw0)))
@@ -150,11 +181,18 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     world.tick()
 
                 pp = PurePursuit(
-                    centerline, wheelbase=_wheelbase(ego),
+                    trajeto, wheelbase=_wheelbase(ego),
                     lookahead=float(prof.get("lookahead", 4.0)),
                     target_speed=float(prof.get("target_speed", 3.0)),
                     k_throttle=float(prof.get("k_throttle", 0.5)),
                     max_steer_deg=max_steer)
+                # O carro nasce no eixo, que pode estar longe do ponto 0 do
+                # traçado. O `_nearest_ahead` so olha 80 pontos a frente do
+                # ultimo indice, entao sem isto ele mira do outro lado da pista
+                # e o expert se debate no lugar -- 0,26 m/s em vez de 1,7.
+                pp.idx = min(range(len(trajeto)),
+                             key=lambda i: (trajeto[i][0] - x0) ** 2
+                             + (trajeto[i][1] - y0) ** 2)
 
                 for _ep in range(episodes_por_pista):
                     writer = EpisodeWriter(_episode_dir(out_dir, global_ep))
@@ -165,7 +203,9 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                         for step in range(steps_per_ep):
                             moving = _speed_ms(ego) >= recovery_min_speed
                             if sched.should_teleport(step, moving):
-                                _teleport_offcenter_track(ego, centerline, rng,
+                                # Cutuca para fora do TRACADO: o que a rede tem de
+                                # aprender a recuperar e a linha que ela vai dirigir.
+                                _teleport_offcenter_track(ego, trajeto, rng,
                                                           recovery_lat, recovery_yaw, z_spawn)
                                 sched.mark(step)
 
@@ -220,6 +260,10 @@ def main():
     p.add_argument("--seconds", type=float, default=60.0)
     p.add_argument("--no-launch", action="store_true")
     p.add_argument("--quality", default="Low")
+    p.add_argument("--tracado", choices=list(MODOS), default="estadio",
+                   help="Caminho do expert. 'estadio' e a linha que o carro "
+                        "consegue executar; 'eixo' e a linha de centro, que "
+                        "este carro NAO consegue seguir em curva nenhuma.")
     p.add_argument("--recovery", action="store_true")
     p.add_argument("--recovery-every", type=float, default=5.0)
     p.add_argument("--recovery-lat", type=float, default=0.8)
@@ -237,7 +281,7 @@ def main():
         episodes_por_pista=a.episodes_por_pista, seconds=a.seconds,
         launch=not a.no_launch, quality=a.quality, recovery=a.recovery,
         recovery_every=a.recovery_every, recovery_lat=a.recovery_lat,
-        recovery_yaw=a.recovery_yaw, seed=a.seed)
+        recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado)
 
 
 if __name__ == "__main__":

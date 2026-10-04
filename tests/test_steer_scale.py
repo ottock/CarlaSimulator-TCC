@@ -33,7 +33,7 @@ def test_the_measured_car_constants_are_the_ones_we_measured():
     # 125 cm de diametro tracados no centro do eixo traseiro, trava total.
     assert CAR_MIN_RADIUS_M == pytest.approx(0.625)
     assert CAR_WHEELBASE_M == pytest.approx(0.21)
-    assert CAR_WIDTH_M == pytest.approx(0.208)
+    assert CAR_WIDTH_M == pytest.approx(0.21)     # medido com trena, 36 x 21 cm
     assert LANE_WIDTH_M == pytest.approx(0.56)
     assert SCALE == pytest.approx(12.0)
 
@@ -98,7 +98,7 @@ def test_the_usable_radius_is_limited_by_the_body_not_the_lane():
     # A curva e 1/4 de disco com raio interno ZERO, entao o limite e so a parede
     # externa: o eixo do carro pode ir ate a largura da faixa menos meia largura.
     assert max_usable_radius_m() == pytest.approx(LANE_WIDTH_M - CAR_WIDTH_M / 2)
-    assert max_usable_radius_m() == pytest.approx(0.456, abs=1e-3)
+    assert max_usable_radius_m() == pytest.approx(0.455, abs=1e-3)
 
 
 def test_the_measured_car_does_NOT_fit_a_concentric_arc():
@@ -106,12 +106,12 @@ def test_the_measured_car_does_NOT_fit_a_concentric_arc():
     # dentro exigiria 0.456 m e o carro faz 0.625. Falta 17 cm. Por isso o
     # expert TEM de cortar o apice -- nao e preferencia de traçado.
     assert corner_fits(CAR_MIN_RADIUS_M) is False
-    assert max_usable_radius_m() == pytest.approx(0.456, abs=1e-3)
-    assert CAR_MIN_RADIUS_M - max_usable_radius_m() == pytest.approx(0.169, abs=2e-3)
+    assert max_usable_radius_m() == pytest.approx(0.455, abs=1e-3)
+    assert CAR_MIN_RADIUS_M - max_usable_radius_m() == pytest.approx(0.170, abs=2e-3)
 
 
 def test_the_extra_three_centimetres_of_real_track_help_but_do_not_save_it():
-    assert max_usable_radius_m(lane_width_m=0.53) == pytest.approx(0.426, abs=1e-3)
+    assert max_usable_radius_m(lane_width_m=0.53) == pytest.approx(0.425, abs=1e-3)
     assert corner_fits(CAR_MIN_RADIUS_M, lane_width_m=0.53) is False
 
 

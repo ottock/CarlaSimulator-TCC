@@ -104,7 +104,23 @@ def oval_dims(centerline):
     return a, b, cx, cy
 
 
-def stadium_path(centerline, half_width, vehicle_width, n_points=240):
+def swept_overhang(radius, length, width):
+    """Quanto a quina dianteira externa passa do raio que o CENTRO descreve.
+
+    MEDIDO na marra: o primeiro estadio que gerei usava ``width/2`` como folga e
+    o expert bateu na parede externa com 0,24 m de sobreposicao. Um carro
+    comprido varre uma faixa mais larga que o proprio corpo ao girar, e e a
+    QUINA que encosta, nao a lateral. Para o WLtoys escalado num raio de 8 m a
+    diferenca e 1,51 m contra 1,26 de meia-largura -- 25 cm que faltavam.
+    """
+    R, L, W = float(radius), float(length), float(width)
+    if R <= 0.0:
+        raise ValueError("raio tem de ser > 0 (recebi %r)" % radius)
+    return math.hypot(R + W / 2.0, L / 2.0) - R
+
+
+def stadium_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
+                 n_points=240):
     """Traçado em estadio: duas semicircunferencias ligadas por duas retas.
 
     O maior estadio que cabe, que e tambem o de menor curvatura. Com ``a`` e
@@ -116,13 +132,19 @@ def stadium_path(centerline, half_width, vehicle_width, n_points=240):
 
     O limite de ``xc`` sai de ``xc + R <= a + c``, que e exatamente ``xc <= a-b``.
 
+    ``c`` desconta a VARREDURA da carroceria, nao meia largura: ver
+    :func:`swept_overhang`. Como a varredura depende de ``R`` e ``R`` depende de
+    ``c``, resolvemos por iteracao (converge em poucos passos).
+
     Args:
         centerline: eixo da pista, ``(x, y)`` ou ``(x, y, yaw)``.
         half_width: meia-largura da faixa util, em metros.
-        vehicle_width: largura do veiculo. O caminho e o CENTRO dele, entao o
-            corredor encolhe meia largura de cada lado. Use a largura do carro
-            REAL escalada, nao a do veiculo do simulador: o traçado tem de ser
-            executavel por quem vai dirigi-lo de verdade.
+        vehicle_width: largura do veiculo.
+        vehicle_length: comprimento do veiculo. Zero reproduz o modelo antigo,
+            que ignora a varredura -- e foi ele que fez o expert bater.
+            Use as medidas do carro REAL escaladas, nao as do veiculo do
+            simulador: o traçado tem de ser executavel por quem vai dirigi-lo
+            de verdade.
 
     Returns:
         ``np.ndarray`` ``(n_points, 3)`` com ``(x, y, yaw)``, fechado e no mesmo
@@ -139,6 +161,17 @@ def stadium_path(centerline, half_width, vehicle_width, n_points=240):
             % (2 * float(half_width), float(vehicle_width)))
 
     R = b + folga
+    for _ in range(60):                      # varredura depende de R e vice-versa
+        nova = b + (float(half_width) - swept_overhang(R, vehicle_length, vehicle_width))
+        if abs(nova - R) < 1e-9:
+            R = nova
+            break
+        R = nova
+    if R <= b:
+        raise ValueError(
+            "corredor util vazio depois de descontar a varredura: um veiculo de "
+            "%.2f x %.2f m nao faz a curva nesta faixa de %.2f m"
+            % (float(vehicle_length), float(vehicle_width), 2 * float(half_width)))
     xc = a - b
 
     p = _sem_ponto_repetido(_xy(centerline))
@@ -211,11 +244,54 @@ def distance_to_centerline(path, centerline):
     return out
 
 
-def fits(path, centerline, half_width, vehicle_width, tol=1e-6):
+def fits(path, centerline, half_width, vehicle_width, vehicle_length=0.0, tol=1e-6):
     """A carroceria inteira fica dentro da faixa, em todo o traçado?
 
     Conferencia independente de como o caminho foi gerado -- um traçado que sai
     da pista e pior que nenhum, porque o expert gravaria o carro raspando.
     """
-    lim = float(half_width) - float(vehicle_width) / 2.0
+    r = min_radius_m(path)
+    recuo = (float(vehicle_width) / 2.0 if math.isinf(r)
+             else swept_overhang(r, vehicle_length, vehicle_width))
+    lim = float(half_width) - max(recuo, float(vehicle_width) / 2.0)
     return bool(distance_to_centerline(path, centerline).max() <= lim + tol)
+
+
+MODOS = ("estadio", "eixo")
+
+
+def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
+                min_radius_required=None, modo="estadio", n_points=240):
+    """Caminho que o expert deve seguir, com a conferencia que faltava.
+
+    ``"eixo"`` devolve a linha de centro -- o comportamento antigo, mantido para
+    as pistas do estande, que nao sao ovais. ``"estadio"`` devolve o traçado.
+
+    ``min_radius_required`` (o raio minimo do carro REAL, na escala do
+    simulador) faz a funcao RECUSAR um caminho que o carro nao executa. E a
+    porta que nao existia: o `dataset_track_v1` inteiro foi coletado sobre o
+    eixo da pista, que exige 3,18 m de raio contra os 7,50 m do carro, e isso
+    so apareceu meses depois, no asfalto.
+
+    Returns:
+        lista de ``(x, y, yaw)``.
+    """
+    if modo not in MODOS:
+        raise ValueError("modo de traçado desconhecido: %r (use %s)" % (modo, list(MODOS)))
+
+    if modo == "eixo":
+        caminho = [(float(p[0]), float(p[1]),
+                    float(p[2]) if len(p) > 2 else 0.0) for p in centerline]
+    else:
+        caminho = [tuple(map(float, linha))
+                   for linha in stadium_path(centerline, half_width, vehicle_width,
+                                             vehicle_length, n_points=n_points)]
+
+    if min_radius_required is not None:
+        r = min_radius_m([(x, y) for x, y, _ in caminho])
+        if r < float(min_radius_required) - 1e-9:
+            raise ValueError(
+                "traçado '%s' exige raio de %.2f m e o carro so faz %.2f m: coletar "
+                "assim ensinaria de novo uma trajetoria inexecutavel"
+                % (modo, r, float(min_radius_required)))
+    return caminho

@@ -38,7 +38,9 @@ import math
 # dianteiras arrastam e ele abre. O que vale e o que o carro FAZ.
 CAR_MIN_RADIUS_M = 0.625
 CAR_WHEELBASE_M = 0.21          # usado so para relatar o angulo equivalente
-CAR_WIDTH_M = 0.208
+# 36 x 21 cm MEDIDOS no carro (o catalogo diz 35,6 x 20,8; vale a trena).
+CAR_LENGTH_M = 0.36
+CAR_WIDTH_M = 0.21
 
 # Faixa util MEDIDA na pista fisica em 2026-10-03. O track_builder modela 0.53
 # (as pecas vieram do Blender com essa medida), entao o simulador e 3 cm mais
