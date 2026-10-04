@@ -35,6 +35,7 @@ import numpy as np
 from ai.dataset_writer import EpisodeWriter, write_meta, LABEL_COLUMNS
 from ai.noise import SteeringNoiseInjector
 from ai.recovery_schedule import RecoveryScheduler
+from ai.stuck import StuckDetector
 from ai.report import dataset_report, print_report
 from ai.sim_lidar import points_to_sectors_m
 from ai.racing_line import (MODOS, expert_path, lateral_offset, min_radius_m,
@@ -86,6 +87,27 @@ def _trajeto_do_expert(modo, centerline, track_cfg, margem):
                 modo, min_radius_m([(x, y) for x, y, _ in caminho]),
                 CAR_MIN_RADIUS_M * SCALE, len(caminho))
     return caminho
+
+
+def _destravar(vehicle, trajeto):
+    """Recoloca o ego no traçado, parado, depois de encravar.
+
+    Sem isto um unico encrave mata o resto da coleta: o veiculo nao e recriado
+    entre episodios. Zera a velocidade de proposito -- reposicionar mantendo o
+    vetor antigo e justamente o que encrava.
+    """
+    loc = vehicle.get_location()
+    i = min(range(len(trajeto)),
+            key=lambda k: (trajeto[k][0] - loc.x) ** 2 + (trajeto[k][1] - loc.y) ** 2)
+    px, py, pyaw = trajeto[i]
+    vehicle.set_transform(carla.Transform(
+        carla.Location(px, py, loc.z + 0.2), carla.Rotation(yaw=math.degrees(pyaw))))
+    try:
+        vehicle.set_target_velocity(carla.Vector3D(0.0, 0.0, 0.0))
+        vehicle.set_target_angular_velocity(carla.Vector3D(0.0, 0.0, 0.0))
+    except AttributeError:
+        pass
+    return True
 
 
 def _empurrao(vehicle, centerline, half_width, veh_width, rng, max_yaw, max_lat):
@@ -195,6 +217,11 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
             # O injetor perturba o esterco APLICADO em surtos e grava como rotulo o
             # comando LIMPO do expert. O carro deriva por fisica, nunca em pose
             # impossivel, e aprende a correcao para os estados em que derivou.
+            # Encrave: o veiculo nao e recriado entre episodios, entao um carro
+            # preso contamina TODO o resto da coleta em silencio. Medido duas
+            # vezes: 11 episodios de 1200 quadros imoveis com "dropped 0".
+            travado = StuckDetector(v_min=0.3, steps=int(2.0 / fixed))
+            n_destravadas = 0
             ruido = SteeringNoiseInjector(
                 dt=fixed, active_fraction=0.3, amplitude=recovery_amp,
                 seed=seed) if recovery else None
@@ -258,7 +285,11 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     sched.reset()   # o `step` recomeca em 0: o relogio tem que recomecar junto
                     try:
                         for step in range(steps_per_ep):
-                            moving = _speed_ms(ego) >= recovery_min_speed
+                            v_agora = _speed_ms(ego)
+                            if travado.update(v_agora):
+                                _destravar(ego, trajeto)
+                                n_destravadas += 1
+                            moving = v_agora >= recovery_min_speed
                             if empurrar and sched.should_teleport(step, moving):
                                 _empurrao(ego, centerline,
                                           track_width(track_cfg) / 2.0,
@@ -285,7 +316,10 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                             obs = read_observation(ego, sensors)
                             dev, _ = deviation_from_centerline(centerline, tf.location.x, tf.location.y)
                             recovering = ruidando or (empurrar and sched.is_recovering(step))
-                            if obs["image"] is not None and dev <= lim_fora:
+                            # Quadro com o carro parado nao e exemplo de nada: a
+                            # imagem nao muda e o rotulo e trava total, porque o
+                            # expert continua tentando. Fora do dataset.
+                            if obs["image"] is not None and dev <= lim_fora                                     and speed >= 0.3:
                                 lidar_m = points_to_sectors_m(
                                     _lidar_points(obs), n_sectors=LIDAR_N_SECTORS,
                                     max_range=LIDAR_MAX_RANGE_M)
@@ -299,8 +333,15 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                                 dropped += 1
                     finally:
                         writer.close()
-                    logger.info("  %s ep%d: kept %d (%d recovery), dropped %d",
-                                pista, global_ep - 1, kept, recovered, dropped)
+                    logger.info("  %s ep%d: kept %d (%d recovery), dropped %d%s",
+                                pista, global_ep - 1, kept, recovered, dropped,
+                                "" if not n_destravadas
+                                else "  [%d destravadas]" % n_destravadas)
+                    if kept < 0.5 * steps_per_ep:
+                        logger.warning(
+                            "  ep%d aproveitou so %d de %d quadros -- o carro passou "
+                            "a maior parte do tempo parado. Conferir antes de treinar.",
+                            global_ep - 1, kept, steps_per_ep)
 
                 for a in reversed(pista_actors):
                     try:
