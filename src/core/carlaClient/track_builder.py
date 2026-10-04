@@ -152,6 +152,8 @@ def _preset(nome: str) -> list[str]:
         return ["tcc_reta_branca", "tcc_reta_branca", "tcc_curva90", "tcc_reta_branca"]
     # --- Pistas do estande (SchemaPista1/2/3) — transcricao peca a peca ---
     # Preenchidas apos conferir a sequencia fechada de cada uma com o grupo.
+    if nome == "oval_tcc":
+        return _OVAL_TCC
     if nome in ("pista1", "pista2", "pista3"):
         seq = _PISTAS_ESTANDE.get(nome)
         if not seq:
@@ -170,6 +172,38 @@ _L, _R = "tcc_curva90", "tcc_curva90_r"
 # sobe (R), nivela (L) — 4 curvas de 90, sem retas. Os picos entre mergulhos
 # ENCOSTAM na faixa do topo (topo do disco = borda inferior da faixa, folga 0).
 _MERGULHO_P3 = [_L, _R, _R, _L]
+
+# -----------------------------------------------------------------------------
+# OVAL DO TCC (2026-10-04) — a pista que o carro REALMENTE consegue percorrer.
+#
+# Por que ela existe: o raio minimo medido do WLtoys e 62,5 cm, e o maior arco
+# concentrico que cabe numa faixa de 53 cm e 42,6 cm. O carro nao segue o eixo da
+# pista em curva nenhuma -- nunca seguiu. As pistas do estande ainda pioram isso
+# com curvas encostadas uma na outra (a pista3 tem [_R, _R]), onde nao sobra reta
+# para montar a entrada.
+#
+# Aqui as pontas sao 180 graus limpos com retas longas entre elas, e o traçado
+# viavel e um ESTADIO: retas por fora, semicirculos de 62,5 cm nas pontas.
+#
+# A pista FISICA usa pecas de 50 cm numa faixa de 56; nao existe prop desse
+# tamanho (so reta_branca 31,5 / reta_cinza 21,5 / curva90 de faixa 53). Montando
+# o mesmo desenho com o que existe:
+#     lado curto  106,0 cm  <- identico ao real
+#     lado longo  159,0 cm  <- 1,9% maior
+#     faixa        53,0 cm  <- 5,4% mais estreita
+# A margem no 180 fica 6,6 cm no sim contra 8,1 cm na pista real: o simulador e
+# um pouco mais apertado que a realidade, que e a direcao segura para transferir.
+#
+# Branca e cinza alternadas de proposito: a troca de textura da sinal a camera
+# ao longo da reta, onde senao e tudo igual.
+# As duas curvas de cada ponta NAO sao coladas: ha uma reta curta entre elas,
+# como na pista fisica. O traçado as atravessa como um 180 unico mesmo assim --
+# e geometria do caminho, nao da pista.
+_LADO_LONGO = [_B, _C, _B, _C]          # 106,0 cm de reta
+_LADO_CURTO = [_B, _C]                  #  53,0 cm de reta
+_OVAL_TCC = (_LADO_LONGO + [_L] + _LADO_CURTO + [_L]
+             + _LADO_LONGO + [_L] + _LADO_CURTO + [_L])
+
 
 _PISTAS_ESTANDE = {
     # Pista 1 (SchemaPista1): anel com topo de 7B+1C, laterais curtas (curva+B+curva;
