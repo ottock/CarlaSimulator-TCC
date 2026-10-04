@@ -110,7 +110,11 @@ _ap.add_argument("--span", type=int, default=STEER_SPAN_US, metavar="US",
                       "Com --span 300 a seta vai ao batente mecanico: nao segure "
                       "parado muito tempo, o servo forca e esquenta." % STEER_SPAN_US)
 _args = _ap.parse_args()
-STEER_SPAN_US = max(0, min(300, int(_args.span)))
+# Teto 400 e nao 300: o batente de 300 foi medido em 2026-09-12 e um fio solto
+# apareceu em 2026-10-04 -- aquela calibracao pode ter parado cedo por causa
+# dele. Vale remedir. Acima do batente real o servo so forca; o aviso abaixo
+# cobre isso.
+STEER_SPAN_US = max(0, min(400, int(_args.span)))
 
 STEER_LEFT_US   = STEER_CENTER_US + STEER_SPAN_US
 STEER_RIGHT_US  = STEER_CENTER_US - STEER_SPAN_US
