@@ -43,6 +43,7 @@ from ai.racing_line import (MODOS, expert_path, lateral_offset, min_radius_m,
 from ai.steer_scale import CAR_LENGTH_M, CAR_MIN_RADIUS_M, CAR_WIDTH_M, SCALE
 from ai.track_ref import track_centerline, track_width, deviation_from_centerline
 from ai.eval_closedloop import _launch_server, _terminate_server, _speed_ms, read_observation
+from ai.eval_closedloop import _attach_collision_sensor
 from core.carlaClient.track_builder import build_track
 from core.carlaClient.professor import PurePursuit, _wheelbase
 from core.carlaClient.world_manager import (
@@ -168,7 +169,7 @@ def _teleport_offcenter_track(vehicle, centerline, rng, max_lat, max_yaw, z):
 
 def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=60.0,
                   launch=True, quality="Low", recovery=False, recovery_every=5.0,
-                  recovery_lat=0.9, recovery_yaw=6.0, recovery_min_speed=1.0, seed=0,
+                  recovery_lat=0.7, recovery_yaw=6.0, recovery_min_speed=1.0, seed=0,
                   tracado="estadio", margem=0.0, recovery_amp=0.2,
                   empurrar=True):
     settings = load_settings(settings_path)
@@ -221,6 +222,10 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
             # preso contamina TODO o resto da coleta em silencio. Medido duas
             # vezes: 11 episodios de 1200 quadros imoveis com "dropped 0".
             travado = StuckDetector(v_min=0.3, steps=int(2.0 / fixed))
+            n_colisoes, ultima_colisao = 0, -10 ** 9
+            # Janela depois do toque: sair raspando tambem nao e exemplo de
+            # recuperacao -- quem manda no carro e a parede, nao o esterco.
+            janela_colisao = int(1.0 / fixed)
             n_destravadas = 0
             ruido = SteeringNoiseInjector(
                 dt=fixed, active_fraction=0.3, amplitude=recovery_amp,
@@ -263,6 +268,12 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     max_steer_deg=max_steer)
                 for _ in range(10):
                     world.tick()
+                # Sensor de colisao: o empurrao pode por o carro encostado na
+                # parede, e MEDIDO no dataset_oval_v2, 656 quadros (4,7%) saiam
+                # com a carroceria sobreposta a parede e 138 deles com o carro a
+                # menos de 1 m/s e esterco -1,000. Isso ensina "nariz na parede
+                # -> trava total", que nao e recuperacao, e moagem.
+                colisoes = _attach_collision_sensor(world, ego, pista_actors)
 
                 pp = PurePursuit(
                     trajeto, wheelbase=_wheelbase(ego),
@@ -285,6 +296,9 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     sched.reset()   # o `step` recomeca em 0: o relogio tem que recomecar junto
                     try:
                         for step in range(steps_per_ep):
+                            if len(colisoes) > n_colisoes:
+                                n_colisoes = len(colisoes)
+                                ultima_colisao = step
                             v_agora = _speed_ms(ego)
                             if travado.update(v_agora):
                                 _destravar(ego, trajeto)
@@ -319,7 +333,9 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                             # Quadro com o carro parado nao e exemplo de nada: a
                             # imagem nao muda e o rotulo e trava total, porque o
                             # expert continua tentando. Fora do dataset.
-                            if obs["image"] is not None and dev <= lim_fora                                     and speed >= 0.3:
+                            batendo = (step - ultima_colisao) < janela_colisao
+                            if (obs["image"] is not None and dev <= lim_fora
+                                    and speed >= 0.3 and not batendo):
                                 lidar_m = points_to_sectors_m(
                                     _lidar_points(obs), n_sectors=LIDAR_N_SECTORS,
                                     max_range=LIDAR_MAX_RANGE_M)
@@ -335,8 +351,11 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                         writer.close()
                     logger.info("  %s ep%d: kept %d (%d recovery), dropped %d%s",
                                 pista, global_ep - 1, kept, recovered, dropped,
-                                "" if not n_destravadas
-                                else "  [%d destravadas]" % n_destravadas)
+                                "".join(
+                                    ([] if not n_destravadas
+                                     else ["  [%d destravadas]" % n_destravadas])
+                                    + ([] if not n_colisoes
+                                       else ["  [%d toques]" % n_colisoes])))
                     if kept < 0.5 * steps_per_ep:
                         logger.warning(
                             "  ep%d aproveitou so %d de %d quadros -- o carro passou "
@@ -382,7 +401,7 @@ def main():
                         "o ruido cobre +/-1,4 cm na escala do carro, insuficiente "
                         "para ensinar recuperacao numa faixa de 53 cm.")
     p.add_argument("--recovery-every", type=float, default=5.0)
-    p.add_argument("--recovery-lat", type=float, default=0.9,
+    p.add_argument("--recovery-lat", type=float, default=0.7,
                    help="teto do empurrao lateral, em metros de simulador")
     p.add_argument("--recovery-yaw", type=float, default=8.0)
     p.add_argument("--seed", type=int, default=0)
