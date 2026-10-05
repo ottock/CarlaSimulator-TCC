@@ -26,9 +26,12 @@ def _treino_like(seed=0):
 
 
 def test_identity_ranges_change_nothing():
+    # noise_std tambem precisa ser zerado: o granulado e uma quarta distorcao,
+    # e sem desliga-lo "identidade" deixou de ser identidade quando ele entrou.
     img = _treino_like()
     out = photometric_jitter(img, np.random.default_rng(0),
-                             contrast=(1.0, 1.0), brightness=(0.0, 0.0), gamma=(1.0, 1.0))
+                             contrast=(1.0, 1.0), brightness=(0.0, 0.0), gamma=(1.0, 1.0),
+                             noise_std=(0.0, 0.0))
     assert np.array_equal(out, img)
 
 
@@ -75,3 +78,16 @@ def test_the_range_covers_the_measured_real_camera():
     assert min(desvios) <= 36, "o aumento nunca chega ao contraste real (%.0f)" % min(desvios)
     # e nao pode ser SO escuro: o modelo ainda precisa ver o caso do simulador
     assert max(medias) >= 115
+
+
+# ---------------------------------------------------------------------------
+# Cobertura do contraste real (2026-10-05)
+# ---------------------------------------------------------------------------
+
+def test_the_ranges_now_reach_the_contrast_the_car_really_produces():
+    # Medido: contraste por quadro 17.3 no carro contra 58.2 no treino. Com as
+    # faixas antigas (0.45 minimo) so 3% das amostras chegavam la.
+    from ai.augment import CONTRAST
+    assert CONTRAST[0] <= 17.3 / 58.2, (
+        "contraste minimo %.2f nao alcanca o %.2f que o carro entrega"
+        % (CONTRAST[0], 17.3 / 58.2))
