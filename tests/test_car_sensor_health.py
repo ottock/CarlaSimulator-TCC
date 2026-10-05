@@ -64,3 +64,34 @@ def test_stale_tracker_starts_stale_until_the_first_update():
     # Antes da primeira volta completa nao ha mapa nenhum -- e isso e' "velho",
     # nao "novo".
     assert StaleTracker(timeout_s=0.5).is_stale(0.0) is True
+
+
+# ---------------------------------------------------------------------------
+# Custo por quadro (2026-10-04)
+# ---------------------------------------------------------------------------
+
+def test_the_blind_check_subsamples_instead_of_reading_every_pixel():
+    # Media o quadro INTEIRO custava 2,76 milhoes de bytes por quadro num Nano
+    # que so entrega 16 Hz. O desvio padrao de uma amostra regular responde a
+    # mesma pergunta -- "ha textura aqui?" -- por 1/64 do trabalho.
+    import time
+    grande = _frame(0, noise=40, seed=5)
+    t0 = time.perf_counter()
+    for _ in range(20):
+        frame_is_blind(grande)
+    rapido = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    for _ in range(20):
+        float(np.asarray(grande).std())
+    completo = time.perf_counter() - t0
+    assert rapido < completo / 4, (
+        "a checagem nao esta subamostrando: %.1f ms contra %.1f ms do quadro inteiro"
+        % (1000 * rapido, 1000 * completo))
+
+
+def test_subsampling_does_not_change_the_verdict():
+    # O ganho nao vale nada se mudar a resposta nos casos que importam.
+    assert frame_is_blind(_frame(0)) is True
+    assert frame_is_blind(_frame(255)) is True
+    rng = np.random.default_rng(11)
+    assert frame_is_blind(rng.integers(0, 255, (720, 1280, 3), dtype=np.uint8)) is False

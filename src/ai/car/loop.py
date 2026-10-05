@@ -65,6 +65,9 @@ class DriveLoop:
         # trabalharia sobre valores ja grampeados em +/-1. Janela 1 = desligado.
         self.steer_filter = SteerMedian(steer_median)
         self.clock = clock or time.monotonic
+        # Ultimo tempo de cada etapa, em segundos. Lido pelo runtime para
+        # imprimir onde o laco gasta o quadro.
+        self.tempos = {}
         self.watchdog = watchdog or FrameWatchdog()
         self.assembler = ScanAssembler()
         self._last_vec = None
@@ -84,6 +87,16 @@ class DriveLoop:
 
     def step(self):
         """Read sensors, run the model, command the servo, log. Returns telemetry."""
+        # Cronometro por etapa. O laco entrega 16 Hz no Jetson e o carro percorre
+        # 9x mais pista por quadro do que o modelo viu no treino -- a taxa e a
+        # alavanca mais barata que existe, e sem medir so da para chutar qual
+        # etapa a consome.
+        # perf_counter, NAO self.clock: o relogio injetavel existe para os
+        # testes controlarem watchdog e frescor do LiDAR, e consumi-lo aqui
+        # esgotava o dublê deles.
+        _t = time.perf_counter
+        _m = self.tempos
+        _t0 = _t()
         now = self.clock()
         stalled = self.watchdog.tick(now)
         dt = 0.0 if self._t_prev is None else (now - self._t_prev)
@@ -94,7 +107,9 @@ class DriveLoop:
             self.lidar_fresh.mark(now)
             self.logger.log_scan(t=now, points=scan)
 
+        _m['lidar'] = _t() - _t0; _t1 = _t()
         frame = self.camera.read()
+        _m['camera'] = _t() - _t1; _t1 = _t()
         control = (0.0, 0.0, 0.0)
         # Sem uma volta completa o vetor teria buracos que a rede leria como "livre";
         # um frame estourado significa laco travado. Alem disso, a bancada mostrou
@@ -103,6 +118,7 @@ class DriveLoop:
         # deixa o ultimo vetor congelado. Em todos os casos o comando seguro e o
         # mesmo: servo ao centro e ESC a zero.
         blind = frame_is_blind(frame)
+        _m['cego'] = _t() - _t1; _t1 = _t()
         stale_lidar = self.lidar_fresh.is_stale(now)
         can_drive = ((self._last_vec is not None) and (not blind)
                      and (not stalled) and (not stale_lidar))
@@ -110,7 +126,9 @@ class DriveLoop:
         steer_aplicado = 0.0
         if can_drive:
             img = preprocess(prepare_frame(frame, self.crop_frac))
+            _m['preproc'] = _t() - _t1; _t1 = _t()
             control = self.engine.infer(img, self._last_vec)
+            _m['inferencia'] = _t() - _t1; _t1 = _t()
             steer_filtrado = self.steer_filter.push(control[0])
             steer_aplicado = apply_steer_gain(steer_filtrado, self.steer_gain)
             servo_us = (steer_to_us(steer_aplicado) if self.steer_span_us is None
@@ -132,9 +150,11 @@ class DriveLoop:
         esc_us = (clamp_cruise_us(self.cruise_us)
                   if (can_drive and not blocked) else ESC_NEUTRAL_US)
 
+        _t1 = _t()
         self.actuator.set_servo_us(servo_us)
         self.actuator.set_esc_us(esc_us)
 
+        _m['atuador'] = _t() - _t1; _t1 = _t()
         vec = self._last_vec
         self.logger.log_frame(
             t=now,
@@ -146,6 +166,8 @@ class DriveLoop:
         # "steer" e o valor CRU do modelo de proposito: o replay_car_log compara
         # o log com a saida da rede para medir fidelidade, e guardar o valor ja
         # amplificado quebraria essa conta. O aplicado vai ao lado.
+        _m['log'] = _t() - _t1
+        _m['total'] = _t() - _t0
         return {"t": now, "steer": control[0], "steer_aplicado": steer_aplicado,
                 "throttle": control[1],
                 "brake": control[2], "servo_us": servo_us, "esc_us": esc_us,

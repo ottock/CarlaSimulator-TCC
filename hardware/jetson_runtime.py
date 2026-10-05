@@ -377,9 +377,17 @@ def main():
                     alertas += "  CAMERA CEGA"
                 if tele["stale_lidar"]:
                     alertas += "  LIDAR VELHO"
+                # Onde o quadro foi gasto. O laco entrega ~16 Hz e o carro
+                # percorre 9x mais pista por quadro do que o treino viu: a taxa
+                # e a alavanca mais barata, e sem este perfil so da para chutar.
+                tm = loop.tempos
+                perfil = " ".join("%s=%.0f" % (k, 1000 * tm.get(k, 0.0))
+                                  for k in ("camera", "cego", "preproc",
+                                            "inferencia", "lidar", "atuador", "log"))
                 print("fps={0:5.1f}  steer={1:+.3f}  servo={2}us  esc={3}us{4}  scan={5}"
                       .format(fps, tele["steer"], tele["servo_us"], tele["esc_us"],
                               alertas, "ok" if tele["has_scan"] else "AGUARDANDO"))
+                print("          ms/quadro: %s  total=%.0f" % (perfil, 1000 * tm.get("total", 0.0)))
                 n, t_report = 0, time.monotonic()
     except KeyboardInterrupt:
         print("\ninterrompido")

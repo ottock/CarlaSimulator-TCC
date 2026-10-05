@@ -27,6 +27,13 @@ def frame_is_blind(frame_bgr, min_std=MIN_STD):
     arr = np.asarray(frame_bgr)
     if arr.size == 0:
         return True
+    # SUBAMOSTRA. Medir o desvio padrao do quadro inteiro custava 2,76 milhoes
+    # de bytes por quadro (1280x720x3) num Jetson que so entrega 16 Hz, e a
+    # pergunta e apenas "ha textura aqui?". Uma amostra regular de 1 em 8
+    # responde igual por 1/64 do trabalho: lente tapada e preto uniforme em
+    # qualquer amostra, e cena real tem textura em qualquer amostra.
+    if arr.ndim >= 2 and arr.shape[0] > 64 and arr.shape[1] > 64:
+        arr = arr[::8, ::8]
     return bool(float(arr.std()) < float(min_std))
 
 
