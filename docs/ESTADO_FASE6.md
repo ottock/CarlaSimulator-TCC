@@ -336,3 +336,60 @@ a escolha dual. Aqui não dá. Converge com o que o carro real mostrou: o feixe 
 por cima das paredes de isopor, então no asfalto ele também não contribui.
 
 **ONNX:** opset 11, 1,9 MB, paridade 5,07e-07, `onnx.checker` OK. Em `models/`.
+
+### `driving_oval_v2` — recuperação de verdade (2026-10-04)
+
+Rafael perguntou se o dataset tinha caso de "bateu e não volta". Tinha, e a
+verificação disso destravou três defeitos encadeados.
+
+**1. Só ruído de esterço não cobre recuperação.** Dispersão de 0,08 m (0,7 cm na
+escala do carro) numa faixa que dá ±16 cm. Aumentar a amplitude não ajuda: em 1,0
+o carro trava em 55% dos quadros e a dispersão quase não muda. Numa pista apertada
+o ruído só altera um pouco o raio; não há para onde vagar.
+
+**2. O empurrão é necessário — errei onde ancorá-lo, por dois lados opostos.**
+Ancorado no eixo, arrancava o carro 1,93 m antes de somar o deslocamento.
+Ancorado no traçado, no início do episódio o carro ainda está no eixo e um
+"empurrão de 0,6" virou um salto medido de 1,4 m com a carroceria 25 cm dentro da
+parede. **Da posição atual** o empurrão é exatamente o que diz ser.
+
+**3. Quadros de batida entravam no dataset.** 656 quadros (4,7%) com a carroceria
+sobreposta à parede, 138 deles abaixo de 1 m/s com rótulo `steer = −1,000`. Agora
+a coleta liga o sensor de colisão do CARLA e descarta o toque e 1 s depois.
+
+Três defesas, cada uma pegou um problema diferente: filtro de velocidade (carro
+parado), `StuckDetector` (um encrave contaminava todos os episódios seguintes),
+sensor de colisão (contato com a parede).
+
+**Dataset `dataset_oval_v2`:** 14.820 quadros, 16 episódios **todos** a 1,75 m/s,
+cobertura fora da linha p95 0,84 m e máx **13 cm na escala do carro**, zero
+quadros venenosos.
+
+**Treino:** parada antecipada na época 39. MAE s/t/b = 0,0426/0,0187/0,0039,
+var_ratio 1,03.
+
+**Malha fechada (acelerador constante 0,20, como o PWM fixo do carro):**
+
+| modelo | resultado |
+|---|---|
+| `driving_oval_v1` (só ruído) | **2029 colisões em 30 m** |
+| **`driving_oval_v2`** | **1/1 limpa**, `mean_dev=0,89 p95=1,76 max=1,78`, 3,4 m/s |
+| `v2` com LiDAR ablado | 1/1 limpa, `mean_dev=0,99 max=1,92` |
+
+A cobertura de recuperação é a diferença entre bater em 30 m e completar a pista.
+
+Dois achados laterais que valem para a escrita:
+
+**O `eval_track` aprovava carro parado.** Reportou "1/1 limpa" para uma corrida com
+`mean_speed=0,0` — um carro parado não bate e não sai da pista. O critério agora
+exige que ele tenha andado (`ai/eval_criterio.py`), e a corrida que motivou isso
+está travada em teste.
+
+**O modelo dirige a 3,4 m/s, o dobro da velocidade de treino.** O Pure Pursuit é
+geométrico, então o par (imagem, esterço) não depende de velocidade — e o fechado
+confirma. Isso é a favor do carro real, que roda ~7× mais rápido que o treino.
+
+**Acelerador na avaliação é CONSTANTE**, como o PWM fixo do carro: a cabeça de
+throttle da rede é ignorada no asfalto, e avaliá-la mediria um carro que não
+existe. Com o dataset novo, que descarta os quadros de arrancada, ela aprendeu só
+o cruzeiro (0,125) e nem sairia do lugar.

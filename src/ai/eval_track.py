@@ -28,6 +28,7 @@ import time
 
 import carla
 
+from ai.eval_criterio import corrida_limpa, motivo
 from ai.metrics import RouteMetrics
 from ai.model_policy import DrivingPolicy
 from ai.track_ref import track_centerline, track_width, deviation_from_centerline
@@ -47,7 +48,7 @@ logger = logging.getLogger("eval_track")
 
 def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0,
                    ablate_lidar=False, realtime=False, follow=True, launch=True,
-                   quality="Low", model_throttle=0.35):
+                   quality="Low", throttle_fixo=0.30):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -101,17 +102,30 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                 logger.info("=== PISTA %s%s (%d passos, LiDAR FOV %s) ===",
                             pista, " [LiDAR ABLADO]" if ablate_lidar else "", steps, fov_txt)
                 metrics = RouteMetrics()
+                percorrido, ant = 0.0, None
                 idx = 0
                 first_col = None
                 for step in range(steps):
                     t0 = time.perf_counter()
                     obs = read_observation(ego, sensors)
                     steer, throttle, brake = policy(obs)
+                    if throttle_fixo is not None:
+                        # No carro o acelerador e PWM CONSTANTE e a cabeca de
+                        # throttle do modelo e ignorada (o longitudinal ficou
+                        # fora do escopo da Fase 6). Avaliar com o throttle da
+                        # rede mede um carro que nao existe -- e com o dataset
+                        # novo, que descarta os quadros de arrancada, ela
+                        # aprendeu so o acelerador de cruzeiro (0,125) e nem
+                        # sai do lugar.
+                        throttle, brake = float(throttle_fixo), 0.0
                     ego.apply_control(carla.VehicleControl(steer=steer, throttle=throttle, brake=brake))
                     world.tick()
                     if spec:
                         update_spectator_position(world, spec)
                     loc = ego.get_transform().location
+                    if ant is not None:
+                        percorrido += math.hypot(loc.x - ant[0], loc.y - ant[1])
+                    ant = (loc.x, loc.y)
                     dev, idx = deviation_from_centerline(centerline, loc.x, loc.y,
                                                          start_idx=idx, window=60)
                     departed = dev > half_w
@@ -127,11 +141,15 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                 s["pista"] = pista
                 s["collisions"] = len(collisions)
                 s["first_col_s"] = first_col * fixed if first_col is not None else -1.0
+                s["distance_m"] = percorrido
                 summaries.append(s)
                 logger.info("PISTA %s: mean_dev=%.2fm p95=%.2fm max=%.2fm offlane=%d collisions=%d "
                             "mean_speed=%.1fm/s%s", pista, s["mean_dev"], s["p95_dev"], s["max_dev"],
                             s["offlane"], s["collisions"], s["mean_speed"],
                             ("  <-- 1a COLISAO @ %.1fs" % s["first_col_s"]) if s["collisions"] else "")
+                if not corrida_limpa(s):
+                    logger.warning("PISTA %s REPROVOU: %s (andou %.1f m)",
+                                   pista, motivo(s), s["distance_m"])
 
                 for a in reversed(pista_actors):
                     try:
@@ -142,10 +160,16 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
         _terminate_server(server)
 
     logger.info("---------------------------------------------")
-    clean = sum(1 for s in summaries if s["offlane"] == 0 and s["collisions"] == 0)
+    # O criterio exige que o carro tenha ANDADO: um carro parado nao bate e nao
+    # sai da pista, e a versao anterior disto aprovou uma corrida com
+    # mean_speed=0.0 como "1/1 limpa".
+    clean = sum(1 for s in summaries if corrida_limpa(s))
     tag = " (LiDAR ABLADO)" if ablate_lidar else ""
-    logger.info("RESUMO%s: %d/%d pistas limpas (sem sair da pista, sem colisao)",
+    logger.info("RESUMO%s: %d/%d pistas limpas (dirigiu, sem sair da pista, sem colisao)",
                 tag, clean, len(summaries))
+    for s in summaries:
+        if not corrida_limpa(s):
+            logger.info("   %s: %s", s["pista"], motivo(s))
     return summaries
 
 
@@ -161,13 +185,17 @@ def main():
     p.add_argument("--no-follow", action="store_true")
     p.add_argument("--no-launch", action="store_true")
     p.add_argument("--quality", default="Low")
+    p.add_argument("--throttle-fixo", type=float, default=0.30, metavar="T",
+                   help="acelerador constante, como o PWM fixo do carro. "
+                        "Passe -1 para usar a cabeca de throttle do modelo.")
     a = p.parse_args()
 
     pistas = [s.strip() for s in a.pistas.split(",") if s.strip()]
     run_track_eval(
         settings_path=a.settings, model_ckpt=a.model, pistas=pistas, seconds=a.seconds,
         obstacles=a.obstacles, ablate_lidar=a.ablate_lidar, realtime=a.realtime,
-        follow=not a.no_follow, launch=not a.no_launch, quality=a.quality)
+        follow=not a.no_follow, launch=not a.no_launch, quality=a.quality,
+        throttle_fixo=(None if a.throttle_fixo < 0 else a.throttle_fixo))
 
 
 if __name__ == "__main__":
