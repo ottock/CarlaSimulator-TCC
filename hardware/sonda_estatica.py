@@ -139,9 +139,15 @@ def main():
     print("=" * 62)
     print("Subindo camera, LiDAR e engine...")
     cam = jr.CsiCamera(flip_method=a.flip_method)
-    lidar = jr.SerialLidar(max_range_m=max_range)
-    eng = jr.TensorRTEngine(a.engine)
-    atu = jr.Actuator()
+    # SEM max_range_m: o padrao e o alcance FISICO do sensor (12 m). Passar aqui
+    # o max_range do modelo (1,0 m na escala do carro) faria o parser DESCARTAR
+    # todo ponto alem de 1 m -- a parede do outro lado da pista sumiria, e com
+    # menos de 50 pontos o ScanAssembler nunca emite scan. Daria "sensor nao
+    # responde" com o sensor perfeito. O recorte na escala do modelo e feito
+    # depois, em scan_to_sectors_m, igual ao DriveLoop.
+    lidar = jr.SerialLidar()
+    eng = jr.TrtEngine(a.engine)
+    atu = jr.Pca9685Actuator()
     atu.safe_state()                       # ESC em neutro: o carro NAO anda
     assembler = ScanAssembler()
     arcos = parse_arcs(jr.SELF_OCCLUSION_ARCS)
