@@ -46,13 +46,33 @@ from ai.car.teclas import LeitorDeTeclas, decodifica
 from ai.shared.image_pipeline import preprocess
 
 # Ordem fixa. Voce decora na preparacao e segue na pista sem olhar a tela.
+#
+# A coluna "esperado" NAO e intuicao -- a primeira versao desta lista era, e
+# estava errada. Dizia "reta no centro: esperado perto de 0" quando o expert ali
+# comanda +0.3 a +1.0, porque do EIXO a linha de pilotagem esta do lado de fora
+# e o Pure Pursuit puxa para ela. Os numeros abaixo vem de avaliar o PROPRIO
+# expert (lookahead 4.0, max_steer 27, linha estadio) nas poses, no oval_tcc.
+#
+# "treino" diz se a pose aparece no dataset. Isto importa mais que o esperado:
+# na linha de pilotagem o rotulo e -0.73 em 70% da volta e NUNCA positivo; as
+# poses colado na parede sao recuperacao, que e 0,25% dos quadros (36 de
+# ~14.400). Errar numa pose FORA do treino nao acusa a percepcao -- acusa o
+# dataset. Errar DENTRO do treino acusa a percepcao.
+#
+# faixa = (min, max) aceitavel, ou None quando o expert e ambiguo ali.
 POSICOES = [
-    ("1. RETA, centro, apontando para a frente", "esperado: perto de 0"),
-    ("2. RETA, colado na parede ESQUERDA", "esperado: DIREITA (+)"),
-    ("3. RETA, colado na parede DIREITA", "esperado: ESQUERDA (-)"),
-    ("4. ENTRADA da curva, no centro", "esperado: no sentido da curva"),
-    ("5. MEIO da curva, no centro", "esperado: forte, no sentido da curva"),
-    ("6. MEIO da curva, colado na parede EXTERNA", "esperado: forte, para dentro"),
+    ("1. RETA, no EIXO (centro da pista)",
+     "+0.3 a +1.0 (DIREITA: a linha fica do lado de fora)", (0.05, 1.0), "nao"),
+    ("2. RETA, colado na parede ESQUERDA",
+     "+1.0 (DIREITA forte)", (0.3, 1.0), "nao"),
+    ("3. RETA, colado na parede DIREITA",
+     "-0.2 a -1.0 (ESQUERDA)", (-1.0, -0.05), "nao"),
+    ("4. RETA, NA LINHA: flanco a ~6 cm da parede EXTERNA",
+     "perto de 0 (a linha na reta e reta)", (-0.25, 0.25), "SIM"),
+    ("5. CURVA, NA LINHA: flanco a ~6 cm da parede EXTERNA",
+     "-0.73 (e o rotulo de 70% da volta)", (-1.0, -0.45), "SIM"),
+    ("6. CURVA, colado na parede EXTERNA, no meio",
+     "-0.15 a -1.0 (ESQUERDA, para dentro)", (-1.0, -0.05), "nao"),
 ]
 
 
@@ -140,8 +160,9 @@ def main():
     print("ESC em NEUTRO -- o carro nao anda em nenhum momento.")
     print("")
     print("LEIA A ORDEM AGORA. Na pista voce nao vera a tela:")
-    for rotulo, esperado in POSICOES:
-        print("   %-44s %s" % (rotulo, esperado))
+    for rotulo, esperado, _faixa, treino in POSICOES:
+        print("   %s" % rotulo)
+        print("        esperado %-44s  no treino: %s" % (esperado, treino))
     print("")
     print("CONTROLES (uma tecla, sem Enter):")
     print("   seta DIREITA (ou Enter, ou espaco) -> mede e avanca")
@@ -175,7 +196,7 @@ def main():
                     continue
                 s = _mede(cam, lidar, eng, assembler, arcos, cfg, max_range,
                           a.crop_frac, a.amostras, jr)
-                resultados.append((POSICOES[i][0], POSICOES[i][1], s))
+                resultados.append(POSICOES[i] + (s,))
                 i += 1
                 # Primeiro o bip (medicao terminou), depois descarta o que ficou
                 # na fila: quem nao ve a tela aperta de novo achando que nao
@@ -192,17 +213,31 @@ def main():
 
     # ---------------- TABELA ----------------
     linhas = ["", "=" * 62, "RESULTADO", "=" * 62]
-    for rotulo, esperado, s in resultados:
+    for rotulo, esperado, faixa, treino, s in resultados:
         if not s:
             linhas.append("%-44s SEM LEITURA" % rotulo)
             continue
         arr = np.array(s)
-        lado = ("DIREITA" if arr.mean() > 0.05
-                else ("ESQUERDA" if arr.mean() < -0.05 else "reto"))
+        media = float(arr.mean())
+        lado = ("DIREITA" if media > 0.05
+                else ("ESQUERDA" if media < -0.05 else "reto"))
+        if faixa is None:
+            veredito = "(expert ambiguo aqui -- nao julga)"
+        elif faixa[0] <= media <= faixa[1]:
+            veredito = "OK"
+        else:
+            veredito = "FORA -- acusa %s" % ("a PERCEPCAO" if treino == "SIM"
+                                             else "o DATASET (pose fora do treino)")
         linhas.append(rotulo)
         linhas.append("    steer %+.3f  (desvio %.3f em %d quadros)  servo %d us  -> %s"
-                      % (arr.mean(), arr.std(), len(arr), steer_to_us(arr.mean()), lado))
-        linhas.append("    %s" % esperado)
+                      % (media, arr.std(), len(arr), steer_to_us(media), lado))
+        linhas.append("    esperado %s   [no treino: %s]" % (esperado, treino))
+        linhas.append("    %s" % veredito)
+        # Carro PARADO, cena identica: a saida tinha de repetir. Desvio alto
+        # significa decisao no fio da navalha, nao medicao ruim.
+        if arr.std() > 0.08:
+            linhas.append("    ATENCAO: desvio %.3f com o carro parado -- a saida"
+                          " oscila sobre a mesma cena" % arr.std())
     if not resultados:
         linhas.append("nenhuma posicao medida")
     texto = "\n".join(linhas)
