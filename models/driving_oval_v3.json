@@ -1,0 +1,8 @@
+{
+  "arch": "DrivingNet",
+  "fov_deg": 180.0,
+  "max_range_m": 12.0,
+  "n_sectors": 72,
+  "opset": 11,
+  "source_checkpoint": "driving_oval_v3.pt"
+}

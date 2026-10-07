@@ -393,3 +393,38 @@ confirma. Isso é a favor do carro real, que roda ~7× mais rápido que o treino
 throttle da rede é ignorada no asfalto, e avaliá-la mediria um carro que não
 existe. Com o dataset novo, que descarta os quadros de arrancada, ela aprendeu só
 o cruzeiro (0,125) e nem sairia do lugar.
+
+### `driving_oval_v3` e uma métrica que não media nada (2026-10-07)
+
+**Gap de imagem, medido na entrada exata do modelo** (`runs/Diag/diag hz` contra
+`dataset_oval_v2`): a imagem real é 3,4× mais chapada (contraste 17,3 contra
+58,2) e 4× mais granulada (gradiente 2,6 contra 0,6). O aumento antigo não
+cobria: só **3%** dos quadros de treino chegavam ao contraste real. Ampliado
+(`CONTRAST` 0,18–1,10, `NOISE_STD` 0–14), os três estatísticos passam a ser
+cobertos e 13% dos quadros ficam tão chapados quanto o real.
+
+**Mas não adiantou.** Nas mesmas imagens reais do carro:
+
+| | \|steer\| | autocorrelação | "acerto de lado" |
+|---|---|---|---|
+| v2 | 0,573 | 0,938 | 70,2% |
+| v3 | 0,636 | 0,941 | 68,3% |
+
+**E a métrica de "acerto de lado" não mede nada.** Rodei o controle que faltava:
+o **expert no simulador tira 50,0%** nela, com correlação **+0,006**. Numa linha
+de pilotagem o carro corre colado na parede externa e esterça *para* a curva, então
+"esterçar para longe da parede mais próxima" não é o comportamento correto. Os
+"21% de quadros errando o lado" que motivaram este trabalho **não existem**.
+
+Fica o registro metodológico: uma métrica inventada precisa ser validada contra o
+expert **antes** de ser usada para diagnosticar. Esta não foi, e custou um ciclo
+inteiro de coleta e treino.
+
+**Onde estamos:** controle bom (50 Hz, autocorrelação 0,94, |Δsteer| 0,105),
+amplitude certa (0,636 contra 0,697 do expert), gap fotométrico coberto, 1/1 limpa
+no simulador — e o carro ainda bate. **Não há nenhuma medição que diga o que ele
+erra na pista real.**
+
+`hardware/sonda_estatica.py` existe para isso: carro parado em posição conhecida,
+ESC em neutro, e o programa imprime o que o modelo responde. Troca inferência por
+medição, e separa percepção de controle sem depender de uma corrida inteira.
