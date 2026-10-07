@@ -5,7 +5,9 @@ Duas correcoes que o primeiro log no carro tornou obrigatorias.
 **Auto-oclusao.** A carroceria bloqueia um arco fixo do sensor. Medido em
 `runs/` (2026-09-12, carro parado em area aberta): ~0 a 120 graus lendo
 0.20-0.32 m com spread <= 0.04 -- perto E constante, a assinatura de algo preso
-ao proprio carro -- mais um ponto encostado em ~212 graus. Deixar isso passar
+ao proprio carro. (Esses metros estavam na escala errada do parser, 4x: a
+carroceria fica a 5-8 cm. O "ponto em ~212 graus" daquele log nao se repetiu
+nas rodadas e o arco 210:215 foi retirado em 2026-10-07.) Deixar isso passar
 entrega a rede uma parede permanente a 25 cm em um terco do circulo, que e' uma
 entrada que ela nunca viu no treino. Descartamos esses retornos, e os setores
 correspondentes passam a ler ``max_range`` ("livre"), que e' exatamente como o

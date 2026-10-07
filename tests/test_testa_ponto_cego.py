@@ -33,7 +33,8 @@ def _carrega():
 def _volta(parede_frente_m, chao_m=None):
     """Uma revolucao do sensor, em ordem crescente de angulo.
 
-    - carroceria (0..120 graus do sensor) a 0,202 m, como nas rodadas;
+    - carroceria (0..120 graus do sensor) a 0,06 m -- o "0,202" das rodadas,
+      que estava na escala errada do parser (4x);
     - fundo a 1,0 m;
     - uma parede de 15 graus centrada na FRENTE do carro, a `parede_frente_m`.
     `chao_m` simula um ponto cego: leituras abaixo dele somem.
@@ -42,7 +43,7 @@ def _volta(parede_frente_m, chao_m=None):
     a = 0.0
     while a < 360.0:
         if a <= 120.0:
-            d = 0.202
+            d = 0.06
         elif abs(a - FRENTE_SENSOR) <= 7.5:
             d = parede_frente_m
         else:
@@ -86,31 +87,31 @@ def _roda(monkeypatch, tmp_path, lidar):
         return fh.read()
 
 
-def test_the_car_body_alone_never_reads_as_a_blind_zone(monkeypatch, tmp_path):
-    """O bug da primeira versao: so a carroceria perto, parede longe.
-    Tem de dizer que o teste nao decide -- nunca 'ponto cego'."""
+def test_the_car_body_is_never_counted_as_a_wall(monkeypatch, tmp_path):
+    """O bug da primeira versao: so a carroceria perto, parede longe. Ela lia a
+    carroceria e anunciava 'ponto cego'. A carroceria tem de ser ignorada."""
     texto = _roda(monkeypatch, tmp_path, _LidarFalso([0.8]))
     assert "MENOR distancia de PAREDE: 0.800 m" in texto
     assert "Nenhuma parede chegou a menos de 40 cm" in texto
     assert "IGNORADA" in texto                     # a carroceria foi vista e descartada
-    assert "ponto cego de" not in texto
+    assert "alcance minimo" not in texto
 
 
 def test_a_wall_brought_to_8_cm_is_measured_at_8_cm(monkeypatch, tmp_path):
     rampa = [0.40 - 0.004 * k for k in range(81)]          # 40 cm ate 8 cm
     texto = _roda(monkeypatch, tmp_path, _LidarFalso(rampa))
     assert "MENOR distancia de PAREDE: 0.080 m" in texto
-    assert "MEDE abaixo de 10 cm" in texto
+    assert "Mais perto que uma parede chegou: 0.080 m" in texto
 
 
-def test_a_real_blind_zone_shows_up_as_a_floor(monkeypatch, tmp_path):
-    """Sensor que nao le abaixo de 0,20: a parede chega a 8 cm mas some antes."""
-    rampa = [0.40 - 0.004 * k for k in range(81)]
-    texto = _roda(monkeypatch, tmp_path, _LidarFalso(rampa, chao_m=0.20))
+def test_pushing_into_the_sensor_floor_reports_the_minimum_range(monkeypatch, tmp_path):
+    """O COIN-D6 nao mede abaixo de ~5 cm: empurrando ate 2 cm, o minimo para la."""
+    rampa = [0.40 - 0.004 * k for k in range(96)]          # 40 cm ate 2 cm
+    texto = _roda(monkeypatch, tmp_path, _LidarFalso(rampa, chao_m=0.05))
     menor = [l for l in texto.splitlines() if l.startswith("MENOR distancia de PAREDE")][0]
     valor = float(menor.split(":")[1].split()[0])
-    assert 0.20 <= valor < 0.21
-    assert "Nada de parede abaixo de" in texto
+    assert 0.05 <= valor < 0.055
+    assert "alcance minimo do sensor" in texto
 
 
 def test_the_png_is_written_even_without_a_screen(monkeypatch, tmp_path):
@@ -121,9 +122,9 @@ def test_the_png_is_written_even_without_a_screen(monkeypatch, tmp_path):
 @pytest.mark.parametrize("menor,trecho", [
     (None, "Nenhuma parede"),
     (0.55, "Nenhuma parede"),
-    (0.06, "MEDE abaixo de 10 cm"),
-    (0.15, "Ve de perto o suficiente"),
-    (0.21, "SO conta como ponto cego se voce de fato ENCOSTOU"),
+    (0.050, "alcance minimo do sensor"),
+    (0.065, "alcance minimo do sensor"),
+    (0.15, "Mais perto que uma parede chegou: 0.150 m"),
 ])
 def test_the_verdict_never_claims_more_than_the_data(menor, trecho):
     assert trecho in "\n".join(_carrega().veredito(menor))

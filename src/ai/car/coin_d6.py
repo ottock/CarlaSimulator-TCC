@@ -19,14 +19,15 @@ MAX_SAMPLES_PER_PACKET = 50
 HEADER = b"\xAA\x55"
 
 
-# Alcance MINIMO do sensor. O filtro original era so 0/1 mm, entao 2 mm passava.
-# Medido nos 257.948 pontos das corridas de pista (2026-09-12): 1.40% dos pontos
-# ficam abaixo de 5 mm, NENHUM ponto cai entre 5 mm e 0.20 m, e 98.6% estao em
-# 0.20 m ou mais. Essa faixa vazia de 195 mm e a fronteira entre ruido e medida,
-# entao 0.05 m tem margem larga dos dois lados -- nao e chute.
-# Tem de ficar bem abaixo de 0.20 m: a pista tem 0.53 m de largura, entao as
-# paredes reais aparecem por volta de 0.26 m e nao podem ser filtradas.
-MIN_RANGE_M = 0.05
+# Alcance MINIMO do sensor, ja na unidade CORRETA (ver _points_from_packet).
+# Nas corridas de 2026-09-12, 1.4% dos pontos ficam abaixo de 1,25 mm (lixo: o
+# sensor usa ~0 para "sem leitura") e nenhum cai entre 1,25 e 50 mm -- 50 mm e o
+# alcance minimo fisico do COIN-D6 (confirmado a mao em 2026-10-07: um objeto
+# empurrado ate encostar para em 0,050 m). 20 mm fica no meio dessa faixa vazia.
+#
+# HISTORICO: este valor era 0.05 e o comentario falava em "0.20 m" porque o
+# parser lia a distancia 4x maior. Nessa escala errada 0.05 equivalia a 12,5 mm.
+MIN_RANGE_M = 0.02
 
 
 class CoinD6Parser:
@@ -82,7 +83,21 @@ class CoinD6Parser:
             offset = 10 + i * 3
             if offset + 2 >= len(pkt):
                 break
-            dist_mm = pkt[offset + 1] | (pkt[offset + 2] << 8)
+            # Os 16 bits NAO sao milimetros: os 2 bits de baixo sao flags e a
+            # distancia e o resto, `>> 2`. E o formato de LiDAR de triangulacao
+            # com intensidade do protocolo YDLIDAR, que este pacote segue byte a
+            # byte (AA 55, CT, LSN, FSA, LSA, CS, amostras de 3 bytes):
+            #     Distance(i) = uint16_t(S(2) << 8 | S(1)) >> 2   [mm]
+            # Lido sem o shift, TUDO saia 4x mais longe. Confirmado de tres
+            # jeitos em 2026-10-07: (1) objeto a ~13 cm do centro do sensor lia
+            # 0,53; (2) objeto encostado lia 0,200, que e o alcance minimo de
+            # 5 cm; (3) nas 9 rodadas de pista, esquerda+direita somava 2,33 m
+            # num corredor de 0,56 m -- /4 da 0,583.
+            # Consequencia: em toda corrida ate aqui as paredes da pista (~28 cm)
+            # chegavam ao modelo a ~1,1 m, alem do max_range de 1,0 m, ou seja
+            # como espaco LIVRE. O braco de LiDAR nunca viu a pista.
+            raw = pkt[offset + 1] | (pkt[offset + 2] << 8)
+            dist_mm = raw >> 2
             dist_m = dist_mm / 1000.0
             # Abaixo do alcance minimo NAO e um obstaculo colado no carro, e
             # ruido: uma parede a 0 m e fisicamente impossivel, e normalizada

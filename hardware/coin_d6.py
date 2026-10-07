@@ -109,7 +109,7 @@ class CoinD6Parser:
                     break
 
                 intensity = pkt[offset]
-                dist_mm   = pkt[offset + 1] | (pkt[offset + 2] << 8)
+                dist_mm   = (pkt[offset + 1] | (pkt[offset + 2] << 8)) >> 2  # 2 bits de flag; ver src/ai/car/coin_d6.py
 
                 # Filtrar: 0 ou 1 mm = sem leitura
                 if dist_mm <= 1:

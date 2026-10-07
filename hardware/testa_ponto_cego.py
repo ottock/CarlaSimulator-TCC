@@ -2,10 +2,14 @@
 # -*- coding: utf-8 -*-
 """O que o LiDAR enxerga de perto? Radar ao vivo + menor distancia de PAREDE.
 
-Por que existe. Nas rodadas de `runs/Diag/diag hz`, 60% dos quadros nao tem
-NENHUM ponto a menos de 30 cm (fora da carroceria), num corredor de 56 cm. Ou o
-sensor nao ve as paredes da pista, ou nao mede de perto, ou o carro estava longe
-delas. Este script mostra qual.
+Por que existe. Nas rodadas de `runs/Diag/diag hz`, 60% dos quadros nao tinham
+NENHUM ponto a menos de 30 cm (fora da carroceria), num corredor de 56 cm.
+
+O QUE ELE ACHOU (2026-10-07). Um objeto a ~13 cm do sensor aparecia a 0,53 m, e
+encostado parava em 0,200. O parser lia a distancia 4x maior: os 2 bits de baixo
+de cada amostra sao flags (ver src/ai/car/coin_d6.py). Corrigido no parser, este
+radar passa a mostrar distancias reais -- e a carroceria, que lia "0,202",
+aparece a ~5 cm, que e tambem o alcance minimo do sensor.
 
 O ERRO QUE A PRIMEIRA VERSAO TINHA. Ela tomava o minimo sobre TODOS os pontos.
 Nas rodadas, 3.853 das 3.976 leituras abaixo de 0,215 m vinham do angulo 30-45
@@ -70,22 +74,20 @@ def histograma(dists, limite=0.60, passo=0.05):
     return linhas
 
 
+# Alcance minimo do COIN-D6, medido a mao: encostado, o objeto para em 0,050 m.
+ALCANCE_MINIMO_M = 0.05
+
+
 def veredito(menor):
     """Le o resultado SEM fingir saber o que o operador fez com o carro."""
     if menor is None or menor > 0.40:
         return ["Nenhuma parede chegou a menos de 40 cm FORA da carroceria.",
-                "O teste nao decide nada assim: encoste a parede pela frente ou",
-                "pelos lados (fora da zona azul) e rode de novo."]
-    if menor < 0.10:
-        return ["O sensor MEDE abaixo de 10 cm (%.3f m). Nao ha ponto cego" % menor,
-                "relevante: se o carro nao ve as paredes da pista, o motivo e outro."]
-    if menor < 0.18:
-        return ["O sensor mediu ate %.3f m. Ve de perto o suficiente para o" % menor,
-                "corredor da pista (paredes a ~28 cm com o carro centrado)."]
-    return ["Nada de parede abaixo de %.3f m." % menor,
-            "SO conta como ponto cego se voce de fato ENCOSTOU a parede pela",
-            "frente ou pelos lados. Se encostou: ponto cego de ~%.2f m. Se nao" % menor,
-            "chegou tao perto, o teste nao decide."]
+                "Encoste a parede pela frente ou pelos lados (fora da zona azul)."]
+    if menor < ALCANCE_MINIMO_M + 0.02:
+        return ["A parede chegou ao alcance minimo do sensor (%.3f m)." % menor,
+                "Abaixo de ~5 cm o COIN-D6 nao mede: e o 'zero' dele."]
+    return ["Mais perto que uma parede chegou: %.3f m." % menor,
+            "Com o carro centrado na pista as paredes ficam a ~28 cm (anel vermelho)."]
 
 
 def _abre_janela(sem_janela):
@@ -227,8 +229,8 @@ def main():
     else:
         linhas.append("voltas do sensor: %d   leituras de parede: %d" % (voltas, len(paredes_todas)))
         if corpo_menor is not None:
-            linhas.append("carroceria: mais perto a %.3f m -- IGNORADA (era ela o 0,202 das rodadas)"
-                          % corpo_menor)
+            linhas.append("carroceria: mais perto a %.3f m -- IGNORADA (o '0,202' das rodadas,"
+                          " na escala errada)" % corpo_menor)
         linhas.append("MENOR distancia de PAREDE: %s"
                       % ("%.3f m" % menor_teste if menor_teste is not None else "nenhuma"))
         linhas.append("")

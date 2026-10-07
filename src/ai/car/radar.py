@@ -13,6 +13,10 @@ SEMPRE so da parede, e a carroceria e desenhada a parte, para se ver.
 
 Convencao de angulos (a mesma do simulador, ``ai.sim_lidar``): 0 = frente do
 carro, POSITIVO = DIREITA. No desenho a frente fica para cima.
+
+O anel vermelho e a MEIA LARGURA da pista (28 cm): com o carro centrado, as
+paredes tem de cair em cima dele. Foi olhando este radar que se achou o erro de
+escala do parser -- um objeto a 13 cm aparecia a 53.
 """
 import math
 
@@ -27,7 +31,7 @@ _TEXTO = (230, 230, 230)
 _PAREDE = (200, 200, 200)
 _CORPO = (200, 90, 40)          # azul: e o proprio carro, nao conta
 _ZONA_CORPO = (60, 30, 15)
-_REF = (40, 40, 220)            # vermelho: a linha de 0,20 m sob suspeita
+_REF = (40, 40, 220)            # vermelho: meia largura da pista
 _PERTO = (60, 220, 60)          # verde: o ponto mais proximo da PAREDE
 
 LARGURA = 640
@@ -91,7 +95,7 @@ def _xy(angulo_carro, dist, cx, cy, escala):
 
 def desenha(parede, corpo, perto, menor_teste, historico, restante_s,
             arcos_sensor=(), offset_deg=0.0, invert=False,
-            raio_m=0.6, ref_m=0.20, janela_s=15.0):
+            raio_m=0.6, ref_m=0.28, janela_s=15.0):
     """Monta o quadro: radar em cima, grafico do minimo no tempo embaixo.
 
     Args:
@@ -165,7 +169,8 @@ def desenha(parede, corpo, perto, menor_teste, historico, restante_s,
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, _TEXTO, 1, cv2.LINE_AA)
     cv2.putText(img, "azul = carroceria (ignorada)", (LARGURA - 260, 22),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, _CORPO, 1, cv2.LINE_AA)
-    cv2.putText(img, "vermelho = 20 cm", (LARGURA - 260, 42),
+    cv2.putText(img, "vermelho = %d cm (meia pista)" % int(round(ref_m * 100)),
+                (LARGURA - 260, 42),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, _REF, 1, cv2.LINE_AA)
 
     _grafico(img, historico, ref_m, raio_m, janela_s)

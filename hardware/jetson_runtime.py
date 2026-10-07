@@ -75,12 +75,17 @@ CMD_START = bytes([0xAA, 0x55, 0xF0, 0x0F])
 CMD_STOP = bytes([0xAA, 0x55, 0xF5, 0x0A])
 
 # Arcos que a PROPRIA CARROCERIA tapa, no frame do sensor. Medidos no log de
-# 2026-09-12 (carro parado em area aberta): 0-120 graus lendo 0.20-0.32 m com
-# spread <= 0.04 (perto E constante = preso ao carro), mais um ponto encostado
-# em ~212 graus. Sem isso a rede ve uma parede permanente a 25 cm em um terco do
-# circulo -- entrada que ela nunca viu no treino.
+# 2026-09-12 (carro parado em area aberta): 0-120 graus perto E constante, ou
+# seja preso ao carro. Os "0.20-0.32 m" daquele log estavam na escala errada do
+# parser (4x): a carroceria fica a 5-8 cm do sensor.
+#
+# O arco 210:215 SAIU em 2026-10-07. Vinha de "um ponto encostado em ~212" num
+# unico log; nas 9 rodadas de pista a mediana ali e ~3,1 m (bruto), igual aos
+# vizinhos, sem pico de leitura proxima -- e o operador confirmou que nao ha
+# chassi la. Era uma fatia de ~5 graus a FRENTE-DIREITA (carro 18-23 graus)
+# sempre lendo "livre", coisa que o treino nunca viu.
 # RE-MEDIR se o LiDAR for remontado: um arco errado cega uma regiao real.
-SELF_OCCLUSION_ARCS = "0:120,210:215"
+SELF_OCCLUSION_ARCS = "0:120"
 
 # CALIBRADO em 2026-09-12 com dois logs de objeto parado (runs/calib_*).
 #
@@ -89,8 +94,9 @@ SELF_OCCLUSION_ARCS = "0:120,210:215"
 # Deslocamento frente->esquerda: +111 graus. A convencao do treino tem esquerda em
 # 270 (sim_lidar usa arctan2(y, x), e no CARLA y aponta para a DIREITA), entao um
 # sensor no mesmo sentido daria -90 e um invertido daria +90. O SINAL decide: este
-# gira ao contrario. (A magnitude deu 111 e nao 90 porque o objeto foi posto a mao;
-# 21 graus a 0.76 m sao 28 cm de desvio lateral.)
+# gira ao contrario. (A magnitude deu 111 e nao 90 porque o objeto foi posto a mao.
+# Os "0.76 m" daquele log sao 19 cm de verdade -- escala do parser, 4x -- o que
+# nao muda nada aqui: angulo nao depende da escala de distancia.)
 #
 # Confirmacao independente: com estes valores o arco da carroceria (0-120 no
 # sensor) cai em 113-233 no frame do carro, centrado em 173 -- ou seja, ATRAS,
@@ -293,8 +299,13 @@ def main():
                         "em +/-1). Ajuste de ATUADOR, nao do modelo: se a rede ja "
                         "satura em +/-1 na curva, nao muda nada. Fica no meta.json "
                         "para as corridas continuarem comparaveis.")
-    p.add_argument("--stop-dist", type=float, default=0.25,
-                   help="Parada de emergencia: metros no cone frontal (padrao 0.25)")
+    p.add_argument("--stop-dist", type=float, default=0.06,
+                   help="Parada de emergencia: metros no cone frontal (padrao 0.06). "
+                        "Era 0.25, mas com o parser lendo 4x maior isso valia 6 cm "
+                        "de verdade -- so parava com o carro ja encostado. Mantido "
+                        "em 6 cm para a correcao do LiDAR ser a UNICA mudanca na "
+                        "proxima corrida. Com 0.25 reais, a parada dispararia em "
+                        "~36%% dos scans das rodadas gravadas, inclusive em curva."),
     p.add_argument("--lidar-offset-deg", type=float, default=LIDAR_OFFSET_DEG,
                    help="Angulo do sensor que aponta para a FRENTE do carro. "
                         "Calibre com um objeto a frente; 0 = sem correcao.")

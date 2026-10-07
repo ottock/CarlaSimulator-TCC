@@ -205,7 +205,7 @@ class CoinD6Parser:
                 offset = 10 + i * 3
                 if offset + 2 >= len(pkt):
                     break
-                dist_mm = pkt[offset + 1] | (pkt[offset + 2] << 8)
+                dist_mm = (pkt[offset + 1] | (pkt[offset + 2] << 8)) >> 2  # 2 bits de flag; ver src/ai/car/coin_d6.py
                 if dist_mm <= 1:
                     continue
                 dist_m = dist_mm / 1000.0

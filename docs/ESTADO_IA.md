@@ -40,6 +40,20 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 | **6b** | Jetson: bancada + runtime (TensorRT + PCA9685) | 🔶 **runtime CONSTRUÍDO e testado no PC** (200 testes); falta **rodar no carro** |
 | 7 | Pista física / gap sim-to-real | ⬜ Deferido |
 
+> **⚠️ 2026-10-07 — o LiDAR do carro lia tudo 4× mais longe.** O parser do COIN-D6
+> tratava os 16 bits de cada amostra como milímetros; os 2 bits de baixo são flags
+> (`distância = uint16 >> 2`, formato de triangulação do protocolo YDLIDAR).
+> Confirmado de três jeitos: objeto a ~13 cm lia 0,53 m; encostado lia 0,200 (o
+> alcance mínimo real é 5 cm); nas 9 rodadas de pista, esquerda+direita somava
+> 2,33 m num corredor de 0,56 m (÷4 = 0,583). Com `max_range` de 1,0 m no carro, as
+> paredes da pista (~28 cm, lidas a ~1,1 m) chegavam ao modelo como **espaço livre**:
+> **toda corrida real até aqui rodou com o braço de LiDAR sem ver a pista.**
+> Corrigido no parser canônico e nas três cópias de `hardware/`. Junto: saiu o arco
+> fantasma `210:215` da auto-oclusão (fatia frontal sempre "livre"), e o padrão de
+> `--stop-dist` virou 0,06 m — o que os 0,25 valiam de fato com o bug — para a
+> correção ser a única mudança na próxima corrida. Nenhuma rodada anterior serve de
+> referência para o LiDAR; números de distância em logs/comentários antigos estão 4×.
+
 **Marco da Fase 2 (`cam_v2.pt`):** modelo só-câmera dirige **~171 s** centrado a
 ~0.08 m no Town01. Open-loop `val_MAE 0.044`, `var_ratio 1.00`.
 
