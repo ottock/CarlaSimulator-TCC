@@ -42,7 +42,7 @@ import numpy as np
 from ai.car.config import car_max_range, load_model_config
 from ai.car.control_map import steer_to_us
 from ai.car.image_crop import prepare_frame
-from ai.car.teclas import decodifica
+from ai.car.teclas import LeitorDeTeclas, decodifica
 from ai.shared.image_pipeline import preprocess
 
 # Ordem fixa. Voce decora na preparacao e segue na pista sem olhar a tela.
@@ -56,39 +56,14 @@ POSICOES = [
 ]
 
 
-class _Tecla(object):
-    """Le UMA tecla do terminal, sem Enter. Volta ao normal ao sair."""
-
-    def __enter__(self):
-        self._fd = None
-        try:
-            import termios
-            import tty
-            self._termios = termios
-            self._fd = sys.stdin.fileno()
-            self._antes = termios.tcgetattr(self._fd)
-            tty.setraw(self._fd)
-        except Exception:
-            # Sem terminal de verdade (pipe, IDE): cai para Enter.
-            self._fd = None
-        return self
-
-    def __exit__(self, *a):
-        if self._fd is not None:
-            self._termios.tcsetattr(self._fd, self._termios.TCSADRAIN, self._antes)
-
-    def ler(self):
-        if self._fd is None:
-            return "\n" if sys.stdin.readline() else "q"
-        ch = sys.stdin.read(1)
-        if ch == "\x1b":
-            # Pode ser seta (tres bytes) ou ESC sozinho. Sem bloquear eternamente.
-            import select
-            if select.select([sys.stdin], [], [], 0.05)[0]:
-                ch += sys.stdin.read(1)
-                if select.select([sys.stdin], [], [], 0.05)[0]:
-                    ch += sys.stdin.read(1)
-        return ch
+def _bip():
+    """Apito do terminal. E a UNICA confirmacao que o operador recebe sem ver a
+    tela: um bip quando a medicao terminou e ja pode mover o carro."""
+    try:
+        sys.stdout.write("\a")
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 def _mede(cam, lidar, eng, assembler, arcos, cfg, max_range, crop_frac, n, jr):
@@ -173,6 +148,9 @@ def main():
     print("   seta ESQUERDA                      -> refaz a posicao anterior")
     print("   q                                  -> encerra e mostra a tabela")
     print("")
+    print("Um BIP marca cada medicao concluida -- e a sua unica confirmacao")
+    print("sem olhar a tela. So mova o carro depois de ouvir o bip.")
+    print("")
     print("A tabela final tambem vai para %s." % a.out)
     print("Aperte uma tecla para comecar.")
 
@@ -180,8 +158,9 @@ def main():
     resultados = []
     i = 0
     try:
-        with _Tecla() as t:
+        with LeitorDeTeclas() as t:
             t.ler()
+            _bip()                         # "ouvi, pode ir para a pista"
             while i < len(POSICOES):
                 acao = decodifica(t.ler())
                 if acao == "sair":
@@ -190,6 +169,7 @@ def main():
                     if resultados:
                         resultados.pop()
                         i -= 1
+                    _bip()
                     continue
                 if acao != "direita":
                     continue
@@ -197,6 +177,12 @@ def main():
                           a.crop_frac, a.amostras, jr)
                 resultados.append((POSICOES[i][0], POSICOES[i][1], s))
                 i += 1
+                # Primeiro o bip (medicao terminou), depois descarta o que ficou
+                # na fila: quem nao ve a tela aperta de novo achando que nao
+                # pegou, e essa tecla repetida mediria a posicao seguinte com o
+                # carro ainda no lugar antigo.
+                _bip()
+                t.limpa()
     except KeyboardInterrupt:
         pass
     finally:
