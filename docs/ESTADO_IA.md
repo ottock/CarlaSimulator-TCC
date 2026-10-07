@@ -53,6 +53,9 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 > `--stop-dist` virou 0,06 m — o que os 0,25 valiam de fato com o bug — para a
 > correção ser a única mudança na próxima corrida. Nenhuma rodada anterior serve de
 > referência para o LiDAR; números de distância em logs/comentários antigos estão 4×.
+> Depois do `>> 2`, sobrou um excesso **constante de ~1 cm** (trena: 10→11, 15→16;
+> pista: esquerda+direita 0,583 m em 0,56 m). Descontado via `LIDAR_DIST_OFFSET_M = 0.010`
+> em `hardware/jetson_runtime.py`, com as outras calibrações do LiDAR.
 
 **Marco da Fase 2 (`cam_v2.pt`):** modelo só-câmera dirige **~171 s** centrado a
 ~0.08 m no Town01. Open-loop `val_MAE 0.044`, `var_ratio 1.00`.

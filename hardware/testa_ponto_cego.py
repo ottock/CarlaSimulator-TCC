@@ -74,8 +74,9 @@ def histograma(dists, limite=0.60, passo=0.05):
     return linhas
 
 
-# Alcance minimo do COIN-D6, medido a mao: encostado, o objeto para em 0,050 m.
-ALCANCE_MINIMO_M = 0.05
+# Alcance minimo do COIN-D6, medido a mao: encostado, o objeto parava em
+# 0,050 m -- 0,040 m depois do desconto de 1 cm (LIDAR_DIST_OFFSET_M).
+ALCANCE_MINIMO_M = 0.04
 
 
 def veredito(menor):

@@ -106,6 +106,17 @@ SELF_OCCLUSION_ARCS = "0:120"
 LIDAR_OFFSET_DEG = 126.8
 LIDAR_INVERT = True
 
+# Excesso CONSTANTE do sensor, medido em 2026-10-07 depois de corrigir a escala
+# (>> 2) do parser. Duas medidas independentes:
+#   - trena: objeto a 10 cm lia 11, a 15 lia 16 -- +1 cm, sem variar com a
+#     distancia (deslocamento, nao escala);
+#   - pista: nas 9 rodadas, esquerda + direita deu 0,583 m num corredor de
+#     0,56 m. A soma das duas e a largura do corredor ONDE QUER que o sensor
+#     esteja no carro, entao ela nao depende de onde a trena foi encostada: o
+#     excesso e do sensor, ~1,15 cm por leitura.
+# RE-MEDIR se trocar o sensor.
+LIDAR_DIST_OFFSET_M = 0.010
+
 CAP_WIDTH, CAP_HEIGHT, CAP_FPS = 1280, 720, 60
 # Rotacao da imagem (nvvidconv flip-method): 0 = sem giro, 2 = 180 graus.
 # Padrao 0 desde 2026-09-12: com 2 a imagem saia de PONTA-CABECA no carro.
@@ -161,7 +172,7 @@ class CsiCamera:
 class SerialLidar:
     """COIN-D6 na serial, devolvendo pontos (angulo, distancia)."""
 
-    def __init__(self, port=None, max_range_m=12.0):
+    def __init__(self, port=None, max_range_m=12.0, dist_offset_m=LIDAR_DIST_OFFSET_M):
         port = port or self._find_port()
         if not port:
             raise RuntimeError("nenhuma porta de LiDAR encontrada (/dev/ttyUSB*)")
@@ -172,7 +183,7 @@ class SerialLidar:
         time.sleep(0.3)
         # max_range aqui e o FISICO do sensor (12 m), nao o do modelo: filtrar
         # antes na escala do carro descartaria leituras validas.
-        self.parser = CoinD6Parser(max_range_m=max_range_m)
+        self.parser = CoinD6Parser(max_range_m=max_range_m, dist_offset_m=dist_offset_m)
 
     @staticmethod
     def _find_port():
@@ -315,9 +326,12 @@ def main():
                         "Medido como True neste carro.")
     p.add_argument("--no-lidar-invert", dest="lidar_invert", action="store_false",
                    help="Desliga o espelhamento (use se o LiDAR for remontado)")
+    p.add_argument("--lidar-dist-offset", type=float, default=LIDAR_DIST_OFFSET_M,
+                   help="Metros subtraidos de toda leitura do LiDAR (padrao %.3f, "
+                        "medido: o sensor le ~1 cm a mais)." % LIDAR_DIST_OFFSET_M)
     p.add_argument("--self-occlusion", default=SELF_OCCLUSION_ARCS,
                    help="Arcos tapados pela carroceria, no frame do sensor: "
-                        "'0:120,210:215'. Vazio desliga a mascara.")
+                        "'0:120'. Vazio desliga a mascara.")
     p.add_argument("--flip-method", type=int, default=FLIP_METHOD,
                    help="Rotacao da camera: 0 = sem giro (padrao), 2 = 180 graus. "
                         "Imagem invertida e entrada fora da distribuicao de treino.")
@@ -329,8 +343,9 @@ def main():
     print("modelo: fov={0} deg  n_sectors={1}  max_range no carro={2:.3f} m"
           .format(cfg["fov_deg"], cfg["n_sectors"], max_range))
     anda = ESC_ARMADO and a.cruise_us >= ESC_MIN_MOVE_US
-    print("LiDAR: offset={0:.1f} deg  invert={1}  auto-oclusao={2}"
-          .format(a.lidar_offset_deg, a.lidar_invert, arcos or "nenhuma"))
+    print("LiDAR: offset={0:.1f} deg  invert={1}  auto-oclusao={2}  desconto={3:.3f} m"
+          .format(a.lidar_offset_deg, a.lidar_invert, arcos or "nenhuma",
+                  a.lidar_dist_offset))
     if a.lidar_offset_deg == 0.0:
         print("AVISO: offset 0 -- se o zero do sensor nao aponta para a frente do")
         print("       carro, a janela de 180 graus do modelo olha para o lado errado.")
@@ -346,7 +361,7 @@ def main():
               .format(a.cruise_us))
 
     camera = CsiCamera(flip_method=a.flip_method)
-    lidar = SerialLidar()
+    lidar = SerialLidar(dist_offset_m=a.lidar_dist_offset)
     engine = TrtEngine(a.engine)
     actuator = Pca9685Actuator()
     actuator.safe_state()
@@ -357,6 +372,7 @@ def main():
         "cruise_us": a.cruise_us, "stop_dist_m": a.stop_dist,
         "flip_method": a.flip_method,
         "lidar_offset_deg": a.lidar_offset_deg, "lidar_invert": a.lidar_invert,
+        "lidar_dist_offset_m": a.lidar_dist_offset,
         "steer_span_us": a.steer_span_us, "steer_gain": a.steer_gain,
         "steer_median": a.steer_median,
         "log_inputs": a.log_inputs,

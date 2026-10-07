@@ -172,3 +172,28 @@ def test_the_track_wall_reads_at_half_the_lane():
     p = CoinD6Parser()
     [(_, d)] = p.feed(_packet_raw(0.0, 0.0, [1115]))
     assert d == pytest.approx(0.278, abs=0.001)
+
+
+# ---------------------------------------------------------------------------
+# Desconto de calibracao (2026-10-07): o sensor le ~1 cm a mais, constante.
+# ---------------------------------------------------------------------------
+
+def test_no_offset_by_default_the_parser_is_pure_protocol():
+    [(_, d)] = CoinD6Parser().feed(_packet(0.0, 0.0, [110]))
+    assert d == pytest.approx(0.110)
+
+
+def test_the_offset_is_subtracted_from_every_reading():
+    # O que o Rafael mediu: 10 cm lia 11, 15 lia 16.
+    p = CoinD6Parser(dist_offset_m=0.010)
+    pts = p.feed(_packet(0.0, 10.0, [110, 160, 290]))
+    assert [d for _, d in pts] == [pytest.approx(0.10), pytest.approx(0.15),
+                                   pytest.approx(0.28)]
+
+
+def test_the_no_return_sentinel_still_drops_after_the_offset():
+    # ~0 vira negativo com o desconto; tem de cair no min_range, nunca virar
+    # uma parede colada no carro.
+    p = CoinD6Parser(dist_offset_m=0.010)
+    pts = p.feed(_packet(0.0, 10.0, [0, 1, 300]))
+    assert [d for _, d in pts] == [pytest.approx(0.29)]

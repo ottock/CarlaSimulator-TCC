@@ -33,9 +33,18 @@ MIN_RANGE_M = 0.02
 class CoinD6Parser:
     """Feed it raw serial bytes, get back polar points."""
 
-    def __init__(self, max_range_m=MAX_RANGE_M, min_range_m=MIN_RANGE_M):
+    def __init__(self, max_range_m=MAX_RANGE_M, min_range_m=MIN_RANGE_M,
+                 dist_offset_m=0.0):
+        """
+        Args:
+            dist_offset_m: subtraido de toda distancia DEPOIS de decodificar.
+                Padrao 0: aqui fica so o protocolo. O valor medido deste sensor
+                e calibracao, e mora com as outras em hardware/jetson_runtime.py
+                (LIDAR_DIST_OFFSET_M).
+        """
         self.max_range_m = max_range_m
         self.min_range_m = min_range_m
+        self.dist_offset_m = float(dist_offset_m)
         self.buffer = bytearray()
         self.parse_errors = 0
 
@@ -98,7 +107,9 @@ class CoinD6Parser:
             # como espaco LIVRE. O braco de LiDAR nunca viu a pista.
             raw = pkt[offset + 1] | (pkt[offset + 2] << 8)
             dist_mm = raw >> 2
-            dist_m = dist_mm / 1000.0
+            # O desconto vem ANTES dos filtros: o "sem leitura" (~0) fica
+            # negativo e cai no min_range, como deve.
+            dist_m = dist_mm / 1000.0 - self.dist_offset_m
             # Abaixo do alcance minimo NAO e um obstaculo colado no carro, e
             # ruido: uma parede a 0 m e fisicamente impossivel, e normalizada
             # vira 0.0 = "encostado", a leitura mais perigosa possivel.

@@ -105,12 +105,13 @@ def test_a_wall_brought_to_8_cm_is_measured_at_8_cm(monkeypatch, tmp_path):
 
 
 def test_pushing_into_the_sensor_floor_reports_the_minimum_range(monkeypatch, tmp_path):
-    """O COIN-D6 nao mede abaixo de ~5 cm: empurrando ate 2 cm, o minimo para la."""
+    """O COIN-D6 nao mede abaixo de ~4 cm (ja com o desconto de 1 cm):
+    empurrando ate 2 cm, o minimo para la."""
     rampa = [0.40 - 0.004 * k for k in range(96)]          # 40 cm ate 2 cm
-    texto = _roda(monkeypatch, tmp_path, _LidarFalso(rampa, chao_m=0.05))
+    texto = _roda(monkeypatch, tmp_path, _LidarFalso(rampa, chao_m=0.04))
     menor = [l for l in texto.splitlines() if l.startswith("MENOR distancia de PAREDE")][0]
     valor = float(menor.split(":")[1].split()[0])
-    assert 0.05 <= valor < 0.055
+    assert 0.04 <= valor < 0.045
     assert "alcance minimo do sensor" in texto
 
 
@@ -122,8 +123,8 @@ def test_the_png_is_written_even_without_a_screen(monkeypatch, tmp_path):
 @pytest.mark.parametrize("menor,trecho", [
     (None, "Nenhuma parede"),
     (0.55, "Nenhuma parede"),
-    (0.050, "alcance minimo do sensor"),
-    (0.065, "alcance minimo do sensor"),
+    (0.040, "alcance minimo do sensor"),
+    (0.055, "alcance minimo do sensor"),
     (0.15, "Mais perto que uma parede chegou: 0.150 m"),
 ])
 def test_the_verdict_never_claims_more_than_the_data(menor, trecho):
