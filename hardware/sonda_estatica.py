@@ -59,6 +59,12 @@ from ai.shared.image_pipeline import preprocess
 # ~14.400). Errar numa pose FORA do treino nao acusa a percepcao -- acusa o
 # dataset. Errar DENTRO do treino acusa a percepcao.
 #
+# A pista vira para a ESQUERDA, portanto a parede EXTERNA e a DIREITA do carro
+# em toda a volta, inclusive nas retas. Verificado: a linha de pilotagem cai a
+# direita do eixo em 48 de 48 pontos amostrados. Os rotulos abaixo dizem
+# "DIREITA" em vez de "externa" porque, agachado na pista, "externa" numa reta
+# nao quer dizer nada.
+#
 # faixa = (min, max) aceitavel, ou None quando o expert e ambiguo ali.
 POSICOES = [
     ("1. RETA, no EIXO (centro da pista)",
@@ -67,11 +73,11 @@ POSICOES = [
      "+1.0 (DIREITA forte)", (0.3, 1.0), "nao"),
     ("3. RETA, colado na parede DIREITA",
      "-0.2 a -1.0 (ESQUERDA)", (-1.0, -0.05), "nao"),
-    ("4. RETA, NA LINHA: flanco a ~6 cm da parede EXTERNA",
+    ("4. RETA, NA LINHA: flanco DIREITO a ~6 cm da parede DIREITA",
      "perto de 0 (a linha na reta e reta)", (-0.25, 0.25), "SIM"),
-    ("5. CURVA, NA LINHA: flanco a ~6 cm da parede EXTERNA",
+    ("5. CURVA, NA LINHA: flanco DIREITO a ~6 cm da parede DIREITA",
      "-0.73 (e o rotulo de 70% da volta)", (-1.0, -0.45), "SIM"),
-    ("6. CURVA, colado na parede EXTERNA, no meio",
+    ("6. CURVA, colado na parede DIREITA (a externa), no meio",
      "-0.15 a -1.0 (ESQUERDA, para dentro)", (-1.0, -0.05), "nao"),
 ]
 
