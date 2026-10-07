@@ -1,38 +1,39 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Qual a distancia MINIMA que o COIN-D6 consegue medir?
+"""O que o LiDAR enxerga de perto? Radar ao vivo + menor distancia de PAREDE.
 
-Por que isto importa mais que tudo o que medimos ate agora. Nas 9 rodadas de
-`runs/Diag/diag hz` a menor distancia que o sensor reportou foi 0,202 m -- o
-MESMO valor nas nove, e o nosso filtro de software corta em 0,05 m. Entao o
-piso nao e nosso: parece ser o ponto cego fisico do sensor.
+Por que existe. Nas rodadas de `runs/Diag/diag hz`, 60% dos quadros nao tem
+NENHUM ponto a menos de 30 cm (fora da carroceria), num corredor de 56 cm. Ou o
+sensor nao ve as paredes da pista, ou nao mede de perto, ou o carro estava longe
+delas. Este script mostra qual.
 
-Se for isso, a consequencia e grave e explica o carro bater:
+O ERRO QUE A PRIMEIRA VERSAO TINHA. Ela tomava o minimo sobre TODOS os pontos.
+Nas rodadas, 3.853 das 3.976 leituras abaixo de 0,215 m vinham do angulo 30-45
+graus do sensor: a propria carroceria, a ~0,20 m atras do sensor. A versao
+antiga leria o carro e anunciaria "ponto cego confirmado" nao importa o que o
+operador fizesse. Agora o minimo e so de PAREDE, e a carroceria aparece em azul
+no radar, separada, para se ver que ela nao conta.
 
-    corredor da pista : 53 cm  -> parede a 26,5 cm com o carro centrado
-    ponto cego        : 20 cm
-    => basta o carro sair 6,3 cm do eixo para a parede PROXIMA desaparecer
+O QUE ELE FAZ
+  - liga SO o LiDAR. Nao abre camera, nao carrega engine, nao toca no PCA9685:
+    servo e ESC nem sao criados. O carro nao tem como andar.
+  - a cada volta do sensor imprime a menor distancia de parede DESSA volta, e
+    marca quando bate o recorde do teste.
+  - se houver tela, abre uma janela com o radar visto de cima (frente para cima)
+    e um grafico do minimo no tempo. Sem tela (SSH sem -X), segue so no
+    terminal. Em qualquer caso salva o ultimo quadro em ponto_cego.png.
 
-E setor sem retorno le `max_range` = "LIVRE" (ver scan_to_sectors_m). Ou seja,
-a parede que ele esta prestes a bater e entregue ao modelo como espaco aberto.
-Pior: a linha de pilotagem corre 11,6 cm fora do eixo, logo na propria linha a
-parede de referencia esta a 14,9 cm, DENTRO do ponto cego.
-
-No simulador nao existe ponto cego: no treino as duas paredes sempre estiveram
-la. Se o teste confirmar, o conserto e modelar o ponto cego no treino.
-
-COMO USAR (nao precisa de pista, so uma parede qualquer):
-    1. Rode o script.
-    2. Durante a contagem, aproxime o carro devagar de uma parede, de uns 40 cm
-       ate ENCOSTAR, e afaste. Repita umas 3 vezes.
-    3. Ele imprime a menor distancia que o sensor reportou, e um histograma.
-
-Se aparecer algo abaixo de 0,10 m, minha conclusao esta errada e o piso de
-0,202 m vem de outro lugar -- o que tambem e util saber.
-
-O ESC nem e tocado: este script nao mexe no carro.
+COMO USAR
+  1. Rode. Durante a contagem, encoste uma parede qualquer no carro PELA FRENTE
+     OU PELOS LADOS -- a traseira e a carroceria (zona azul no radar) e e
+     ignorada. Comece a ~40 cm e va ate ENCOSTAR. Repita umas 3 vezes, devagar.
+  2. Bonus: ponha o carro na pista por alguns segundos e olhe o radar. Se o
+     sensor enxerga as paredes, aparecem duas linhas de pontos a ~28 cm, uma de
+     cada lado.
+  3. `q` na janela (ou Ctrl+C) encerra antes do tempo.
 """
 import argparse
+import io
 import os
 import sys
 import time
@@ -42,14 +43,20 @@ sys.path.insert(0, os.path.join(_REPO, "src"))
 
 import numpy as np
 
+from ai.car import radar
+from ai.car.lidar_frame import parse_arcs
+from ai.car.scan_assembly import ScanAssembler
+
+TITULO_JANELA = "LiDAR - radar (q para sair)"
+
 
 def histograma(dists, limite=0.60, passo=0.05):
-    """Conta quantas leituras cairam em cada faixa de 5 cm."""
+    """Conta quantas leituras de parede cairam em cada faixa de 5 cm."""
     linhas = []
     arr = np.asarray(dists, dtype=np.float64)
     n = len(arr)
     faixa = 0.0
-    while faixa < limite:
+    while faixa < limite - 1e-9:
         c = int(((arr >= faixa) & (arr < faixa + passo)).sum())
         if c:
             pct = 100.0 * c / n
@@ -63,80 +70,179 @@ def histograma(dists, limite=0.60, passo=0.05):
     return linhas
 
 
+def veredito(menor):
+    """Le o resultado SEM fingir saber o que o operador fez com o carro."""
+    if menor is None or menor > 0.40:
+        return ["Nenhuma parede chegou a menos de 40 cm FORA da carroceria.",
+                "O teste nao decide nada assim: encoste a parede pela frente ou",
+                "pelos lados (fora da zona azul) e rode de novo."]
+    if menor < 0.10:
+        return ["O sensor MEDE abaixo de 10 cm (%.3f m). Nao ha ponto cego" % menor,
+                "relevante: se o carro nao ve as paredes da pista, o motivo e outro."]
+    if menor < 0.18:
+        return ["O sensor mediu ate %.3f m. Ve de perto o suficiente para o" % menor,
+                "corredor da pista (paredes a ~28 cm com o carro centrado)."]
+    return ["Nada de parede abaixo de %.3f m." % menor,
+            "SO conta como ponto cego se voce de fato ENCOSTOU a parede pela",
+            "frente ou pelos lados. Se encostou: ponto cego de ~%.2f m. Se nao" % menor,
+            "chegou tao perto, o teste nao decide."]
+
+
+def _abre_janela(sem_janela):
+    """Janela so se houver tela. Uma falha aqui nunca derruba o teste."""
+    if sem_janela:
+        return False, "janela desligada (--sem-janela)"
+    if not os.environ.get("DISPLAY"):
+        return False, ("sem tela (DISPLAY vazio) -- rode no monitor do Jetson ou "
+                       "com 'ssh -X'. Seguindo so no terminal.")
+    try:
+        import cv2
+        cv2.namedWindow(TITULO_JANELA, cv2.WINDOW_AUTOSIZE)
+        return True, "janela aberta"
+    except Exception as e:
+        return False, "nao consegui abrir a janela (%s). Seguindo so no terminal." % e
+
+
 def main():
-    p = argparse.ArgumentParser(description="Ponto cego do LiDAR")
+    p = argparse.ArgumentParser(description="Radar do LiDAR e menor distancia de parede")
     p.add_argument("--segundos", type=float, default=30.0)
+    p.add_argument("--raio", type=float, default=0.6,
+                   help="alcance desenhado no radar, em metros")
+    p.add_argument("--sem-janela", action="store_true",
+                   help="nao abre janela; so terminal + png no fim")
     p.add_argument("--out", default="ponto_cego.txt")
+    p.add_argument("--png", default="ponto_cego.png")
     a = p.parse_args()
 
     sys.path.insert(0, os.path.join(_REPO, "hardware"))
     import jetson_runtime as jr
 
+    arcos = parse_arcs(jr.SELF_OCCLUSION_ARCS)
+    off, inv = jr.LIDAR_OFFSET_DEG, jr.LIDAR_INVERT
+
     print("")
     print("=" * 62)
-    print("PONTO CEGO DO LIDAR -- o carro NAO anda")
+    print("RADAR DO LIDAR -- o carro NAO anda (so o LiDAR e ligado)")
     print("=" * 62)
     print("Subindo o LiDAR...")
-    # Alcance FISICO (padrao 12 m). Passar o alcance do modelo aqui descartaria
-    # justamente as leituras distantes que queremos ver no histograma.
+    # Alcance FISICO (padrao 12 m): o radar quer ver tudo, nao so 1 m.
     lidar = jr.SerialLidar()
+    janela, motivo = _abre_janela(a.sem_janela)
+    print(motivo)
     print("")
-    print("Agora, por %.0f s: aproxime o carro de uma parede, de ~40 cm ate" % a.segundos)
-    print("ENCOSTAR, e afaste. Repita umas 3 vezes, devagar.")
+    print("Encoste uma parede PELA FRENTE OU PELOS LADOS (a traseira e a carroceria,")
+    print("que e ignorada), de ~40 cm ate ENCOSTAR. Umas 3 vezes, devagar.")
     print("")
 
-    todas = []
+    assembler = ScanAssembler()
+    paredes_todas = []          # distancias de parede, o teste inteiro
+    corpo_menor = None
+    historico = []
+    menor_teste = None
+    recorde_impresso = None
+    ultimo = None               # (parede, corpo, perto) da volta mais recente
+    voltas = 0
     t0 = time.time()
-    ultimo_aviso = 0.0
+
     try:
         while time.time() - t0 < a.segundos:
-            pts = lidar.read_points()
-            for _ang, d in pts:
-                todas.append(d)
-            # Um aviso por segundo, so para saber que esta vivo.
-            if time.time() - ultimo_aviso >= 1.0:
-                resta = a.segundos - (time.time() - t0)
-                menor = min(todas) if todas else float("nan")
-                print("  faltam %4.0f s   leituras %7d   menor ate agora %.3f m"
-                      % (resta, len(todas), menor))
-                ultimo_aviso = time.time()
-            time.sleep(0.01)
+            for scan in assembler.feed(lidar.read_points()):
+                voltas += 1
+                agora_t = time.time()
+                parede_s, corpo_s = radar.separa(scan, arcos)
+                parede = radar.para_carro(parede_s, off, inv)
+                corpo = radar.para_carro(corpo_s, off, inv)
+                paredes_todas.extend(d for _, d in parede)
+                if corpo:
+                    m = min(d for _, d in corpo)
+                    corpo_menor = m if corpo_menor is None else min(corpo_menor, m)
+
+                perto = radar.mais_proximo(parede)
+                historico.append((agora_t, perto[1] if perto else None))
+                if perto is not None and (menor_teste is None or perto[1] < menor_teste):
+                    menor_teste = perto[1]
+                ultimo = (parede, corpo, perto)
+                restante = a.segundos - (agora_t - t0)
+
+                # Recorde: linha permanente, mas so quando melhora 5 mm, para
+                # nao virar uma cascata nos primeiros segundos.
+                if (menor_teste is not None
+                        and (recorde_impresso is None or menor_teste < recorde_impresso - 0.005)):
+                    recorde_impresso = menor_teste
+                    sys.stdout.write("\r%s\r  >> novo menor do teste: %.3f m  %+.0f graus (%s)\n"
+                                     % (" " * 78, perto[1], radar.assinado(perto[0]),
+                                        radar.lado(perto[0])))
+
+                # A linha viva: a menor medida DESTA volta, sempre.
+                if perto is not None:
+                    viva = ("  agora %.3f m %+5.0f graus (%-8s) | menor do teste %.3f m | faltam %2.0f s"
+                            % (perto[1], radar.assinado(perto[0]), radar.lado(perto[0]),
+                               menor_teste, max(0.0, restante)))
+                else:
+                    viva = "  agora: nenhuma parede fora da carroceria | faltam %2.0f s" % max(0.0, restante)
+                sys.stdout.write("\r" + viva.ljust(78))
+                sys.stdout.flush()
+
+                if janela:
+                    try:
+                        import cv2
+                        img = radar.desenha(parede, corpo, perto, menor_teste, historico,
+                                            restante, arcos_sensor=arcos,
+                                            offset_deg=off, invert=inv, raio_m=a.raio)
+                        cv2.imshow(TITULO_JANELA, img)
+                        if (cv2.waitKey(1) & 0xFF) == ord("q"):
+                            raise KeyboardInterrupt
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as e:
+                        janela = False
+                        sys.stdout.write("\n  janela falhou (%s); seguindo so no terminal\n" % e)
+            time.sleep(0.005)
     except KeyboardInterrupt:
-        print("\ninterrompido")
+        sys.stdout.write("\n  interrompido\n")
     finally:
         lidar.close()
+        if janela:
+            try:
+                import cv2
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
+    sys.stdout.write("\n")
+
+    # Ultimo quadro em arquivo: funciona mesmo sem tela, da para copiar via scp.
+    if ultimo is not None:
+        try:
+            import cv2
+            img = radar.desenha(ultimo[0], ultimo[1], ultimo[2], menor_teste, historico,
+                                0.0, arcos_sensor=arcos, offset_deg=off, invert=inv,
+                                raio_m=a.raio)
+            cv2.imwrite(a.png, img)
+        except Exception as e:
+            print("nao consegui salvar %s: %s" % (a.png, e))
 
     linhas = ["", "=" * 62, "RESULTADO", "=" * 62]
-    if not todas:
-        linhas.append("NENHUMA leitura -- o LiDAR nao entregou nada. Verifique a porta.")
+    if not voltas:
+        linhas.append("NENHUMA volta completa do LiDAR. Verifique a porta e a alimentacao.")
     else:
-        arr = np.asarray(todas)
-        linhas.append("leituras: %d" % len(arr))
-        linhas.append("MENOR distancia reportada: %.3f m" % arr.min())
+        linhas.append("voltas do sensor: %d   leituras de parede: %d" % (voltas, len(paredes_todas)))
+        if corpo_menor is not None:
+            linhas.append("carroceria: mais perto a %.3f m -- IGNORADA (era ela o 0,202 das rodadas)"
+                          % corpo_menor)
+        linhas.append("MENOR distancia de PAREDE: %s"
+                      % ("%.3f m" % menor_teste if menor_teste is not None else "nenhuma"))
         linhas.append("")
-        linhas += histograma(arr)
-        linhas.append("")
-        if arr.min() < 0.10:
-            linhas.append("O sensor LE abaixo de 10 cm. Minha conclusao estava errada:")
-            linhas.append("o piso de 0,202 m nas rodadas vem de outro lugar.")
-        elif arr.min() < 0.18:
-            linhas.append("Ponto cego menor que eu estimei (%.3f m). Da para usar," % arr.min())
-            linhas.append("mas ainda cega a parede proxima em parte do corredor.")
-        else:
-            linhas.append("CONFIRMADO: ponto cego de %.3f m." % arr.min())
-            linhas.append("Num corredor de 53 cm, a parede proxima desaparece quando o")
-            linhas.append("carro sai %.1f cm do eixo -- e o setor passa a ler 'livre'."
-                          % ((0.265 - arr.min()) * 100))
-            linhas.append("Na linha de pilotagem (11,6 cm fora do eixo) a parede de")
-            linhas.append("referencia esta a 14,9 cm: dentro do ponto cego.")
-            linhas.append("Conserto: modelar este ponto cego no treino.")
+        if paredes_todas:
+            linhas.append("histograma das leituras de parede:")
+            linhas += histograma(paredes_todas)
+            linhas.append("")
+        linhas += veredito(menor_teste)
     texto = "\n".join(linhas)
     print(texto)
     try:
-        import io
         with io.open(a.out, "w", encoding="utf-8") as fh:
             fh.write(texto + "\n")
-        print("\nsalvo em %s" % a.out)
+        print("\nsalvo em %s e %s" % (a.out, a.png))
     except Exception as e:
         print("\nnao consegui salvar em %s: %s" % (a.out, e))
 
