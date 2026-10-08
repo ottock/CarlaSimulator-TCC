@@ -487,3 +487,109 @@ def test_a_degraded_frame_clears_the_history():
     loop, kw = _loop(lidar=lidar, engine=SequenceEngine([0.9]), steer_median=3)
     loop.step()
     assert loop.steer_filter._buf == []
+
+
+# ---------------------------------------------------------------------------
+# Trava de arranque e LiDAR atrasado (2026-10-07)
+#
+# Nas corridas de runs/Diag/lidar_x4_2026-10-07_2 o laco travava no inicio, o
+# LiDAR enchia a fila da serial, e o modelo recebia o LiDAR de SEGUNDOS atras
+# enquanto o carro ja andava: 30-33 voltas por meio segundo saindo da fila
+# contra as 5 que o sensor produz. Tres das quatro batidas foram no primeiro
+# meio metro. O ESC agora espera o laco ficar saudavel E o LiDAR em dia.
+# ---------------------------------------------------------------------------
+
+CRUZEIRO = STEER_CENTER_US + round(0.5 * STEER_SPAN_US)
+
+
+class GiraSempre(FakeLidar):
+    """Uma volta nova por leitura; num passo escolhido, uma FILA de voltas."""
+
+    def __init__(self, fila_no_passo=None, voltas_na_fila=4):
+        FakeLidar.__init__(self)
+        self.passo = 0
+        self.fila_no_passo = fila_no_passo
+        self.voltas_na_fila = voltas_na_fila
+        self.frag = [(float(a), 0.5) for a in range(300, 360, 2)]
+        self.rev = [(float(a), 0.5) for a in range(0, 360, 2)]
+
+    def read_points(self):
+        self.passo += 1
+        if self.passo == 1:
+            return self.frag + self.rev
+        if self.passo == self.fila_no_passo:
+            return self.rev * self.voltas_na_fila
+        return list(self.rev)
+
+
+def _relogio(passo=0.05):
+    t = [100.0]
+
+    def agora():
+        t[0] += passo
+        return t[0]
+    return agora
+
+
+def _roda(loop, n):
+    return [loop.step() for _ in range(n)]
+
+
+def test_the_esc_waits_for_a_steady_start():
+    loop, kw = _loop(lidar=GiraSempre(), clock=_relogio(), cruise_us=CRUZEIRO,
+                     arranque_s=0.5)
+    teles = _roda(loop, 20)
+    esc = kw["actuator"].esc_history
+    primeiro_saudavel = next(t["t"] for t in teles if t["has_scan"])
+    primeiro_andando = next(t["t"] for t, e in zip(teles, esc) if e == CRUZEIRO)
+    assert primeiro_andando - primeiro_saudavel >= 0.5 - 1e-6
+    assert all(e == ESC_NEUTRAL_US for t, e in zip(teles, esc)
+               if t["t"] < primeiro_saudavel + 0.45)
+    assert esc[-1] == CRUZEIRO
+
+
+def test_the_servo_keeps_following_the_model_while_waiting():
+    # Parado, o servo continua obedecendo: da para ver que o modelo esta vivo,
+    # e o carro nao anda.
+    loop, kw = _loop(lidar=GiraSempre(), clock=_relogio(), cruise_us=CRUZEIRO,
+                     arranque_s=5.0)
+    _roda(loop, 5)
+    assert kw["actuator"].servo_history[-1] != STEER_CENTER_US
+    assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US
+
+
+def test_a_backlogged_read_is_flagged():
+    loop, _ = _loop(lidar=GiraSempre(fila_no_passo=5), clock=_relogio())
+    teles = _roda(loop, 6)
+    assert teles[4]["voltas"] == 4
+    assert teles[4]["lidar_atrasado"] is True
+    assert teles[5]["lidar_atrasado"] is False
+
+
+def test_a_backlog_before_release_restarts_the_wait():
+    # Sem a fila, liberaria em ~100,60 s. A fila no passo 8 (100,40) zera a
+    # contagem: o carro so pode andar meio segundo DEPOIS de o LiDAR estar em dia.
+    loop, kw = _loop(lidar=GiraSempre(fila_no_passo=8), clock=_relogio(),
+                     cruise_us=CRUZEIRO, arranque_s=0.5)
+    teles = _roda(loop, 24)
+    esc = kw["actuator"].esc_history
+    t_fila = teles[7]["t"]
+    primeiro_andando = next(t["t"] for t, e in zip(teles, esc) if e == CRUZEIRO)
+    assert primeiro_andando - t_fila > 0.5 - 1e-6
+
+
+def test_after_release_a_backlog_does_not_stop_the_car():
+    # Depois de liberado, ler a fila inteira deixa o vetor com a volta MAIS
+    # NOVA; parar por isso seria parar a toa. As checagens de sempre seguem.
+    loop, kw = _loop(lidar=GiraSempre(fila_no_passo=20), clock=_relogio(),
+                     cruise_us=CRUZEIRO, arranque_s=0.3)
+    teles = _roda(loop, 21)
+    assert teles[19]["lidar_atrasado"] is True
+    assert teles[19]["liberado"] is True
+    assert kw["actuator"].esc_history[19] == CRUZEIRO
+
+
+def test_without_the_gate_the_old_behaviour_holds():
+    loop, kw = _loop(lidar=GiraSempre(), clock=_relogio(), cruise_us=CRUZEIRO)
+    _roda(loop, 2)
+    assert kw["actuator"].esc_history[-1] == CRUZEIRO

@@ -34,7 +34,7 @@ class DriveLoop:
                  cruise_us=ESC_NEUTRAL_US, stop_dist_m=0.25,
                  lidar_offset_deg=0.0, lidar_invert=False, self_occlusion=(),
                  lidar_timeout_s=0.5, steer_span_us=None, steer_gain=1.0,
-                 steer_median=1):
+                 steer_median=1, arranque_s=0.0, max_voltas_por_leitura=2):
         self.camera = camera
         self.lidar = lidar
         self.engine = engine
@@ -72,6 +72,18 @@ class DriveLoop:
         self.assembler = ScanAssembler()
         self._last_vec = None
         self._t_prev = None
+        # Trava de arranque (2026-10-07). Nas corridas de runs/Diag/lidar_x4 o
+        # laco travava no inicio, o LiDAR enchia a fila da serial, e o carro
+        # arrancava recebendo o LiDAR de SEGUNDOS atras -- batia no primeiro
+        # meio metro. Agora o ESC so sai de neutro depois de `arranque_s`
+        # segundos SEGUIDOS de laco saudavel e sem fila no LiDAR. Depois de
+        # liberado nao trava de novo: dali em diante valem as checagens de
+        # sempre (frescor, watchdog, parada). 0 = sem trava, o comportamento
+        # antigo, que os testes do envelope usam.
+        self.arranque_s = float(arranque_s)
+        self.max_voltas_por_leitura = int(max_voltas_por_leitura)
+        self._liberado = self.arranque_s <= 0.0
+        self._saudavel_desde = None
 
     def _sectors_from_scan(self, scan):
         angles = [a for a, _ in scan]
@@ -102,10 +114,17 @@ class DriveLoop:
         dt = 0.0 if self._t_prev is None else (now - self._t_prev)
         self._t_prev = now
 
+        voltas = 0
         for scan in self.assembler.feed(self.lidar.read_points()):
+            voltas += 1
             self._last_vec = self._sectors_from_scan(scan)
             self.lidar_fresh.mark(now)
             self.logger.log_scan(t=now, points=scan)
+        # O sensor da ~10 voltas/s e o laco roda a 20-50 Hz: mais de duas voltas
+        # numa unica leitura so acontece com FILA acumulada. O frescor acima nao
+        # pega isso -- cada volta velha e carimbada com a hora em que foi LIDA,
+        # nao com a hora em que foi medida.
+        atrasado = voltas > self.max_voltas_por_leitura
 
         _m['lidar'] = _t() - _t0; _t1 = _t()
         frame = self.camera.read()
@@ -147,8 +166,16 @@ class DriveLoop:
         # SEGURANCA, nao comportamento aprendido: a cabeca de freio esta inerte.
         blocked = (self._last_vec is not None and
                    front_blocked(self._last_vec, self.stop_dist_m / self.max_range))
+        if not self._liberado:
+            if can_drive and not atrasado:
+                if self._saudavel_desde is None:
+                    self._saudavel_desde = now
+                if now - self._saudavel_desde >= self.arranque_s:
+                    self._liberado = True
+            else:
+                self._saudavel_desde = None
         esc_us = (clamp_cruise_us(self.cruise_us)
-                  if (can_drive and not blocked) else ESC_NEUTRAL_US)
+                  if (can_drive and not blocked and self._liberado) else ESC_NEUTRAL_US)
 
         _t1 = _t()
         self.actuator.set_servo_us(servo_us)
@@ -174,4 +201,6 @@ class DriveLoop:
                 "blocked": blocked, "blind": blind, "stale_lidar": stale_lidar,
                 "dt": dt,
                 "stalled": stalled, "has_scan": self._last_vec is not None,
+                "voltas": voltas, "lidar_atrasado": atrasado,
+                "liberado": self._liberado,
                 "lidar_vec": vec}

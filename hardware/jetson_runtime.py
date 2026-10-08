@@ -45,6 +45,7 @@ import pycuda.autoinit  # noqa: F401  (inicializa o contexto CUDA)
 import Adafruit_PCA9685
 
 from ai.car.coin_d6 import CoinD6Parser
+from ai.car.serial_io import ler_fila
 from ai.car.config import car_max_range, load_model_config
 from ai.car.control_map import ESC_MAX_US, ESC_MIN_MOVE_US, ESC_NEUTRAL_US, STEER_CENTER_US
 from ai.car.lidar_frame import parse_arcs
@@ -191,10 +192,17 @@ class SerialLidar:
         return portas[0] if portas else None
 
     def read_points(self):
-        n = self.ser.in_waiting
-        if not n:
+        # A fila INTEIRA, nao so o primeiro lote de ~4 KB: ver ai/car/serial_io.py.
+        dados = ler_fila(self.ser)
+        if not dados:
             return []
-        return self.parser.feed(self.ser.read(n))
+        return self.parser.feed(dados)
+
+    def descarta_fila(self):
+        """Joga fora o que acumulou enquanto a engine carregava. Chamado logo
+        antes do laco: sem isto a primeira leitura e o passado."""
+        self.ser.reset_input_buffer()
+        self.parser.buffer = bytearray()
 
     def close(self):
         try:
@@ -299,6 +307,11 @@ def main():
                         "Se o batente real for maior, todo comando de esterco sai "
                         "reduzido e o carro subvira. Meca com "
                         "hardware/calibra_servo.py, rodas no ar.")
+    p.add_argument("--arranque-s", type=float, default=1.0,
+                   help="Segundos SEGUIDOS de laco saudavel e sem fila no LiDAR "
+                        "antes de o ESC sair de neutro (padrao 1.0). Nas corridas "
+                        "de 2026-10-07 o carro arrancava com o LiDAR de segundos "
+                        "atras e batia no primeiro meio metro. 0 desliga.")
     p.add_argument("--steer-median", type=int, default=1,
                    help="Janela IMPAR da mediana causal sobre o esterco cru, "
                         "antes do ganho. 1 = desligado, 3 = recomendado. Medido "
@@ -363,6 +376,12 @@ def main():
     camera = CsiCamera(flip_method=a.flip_method)
     lidar = SerialLidar(dist_offset_m=a.lidar_dist_offset)
     engine = TrtEngine(a.engine)
+    # Aquecimento: a primeira inferencia aloca memoria e inicializa kernels.
+    # Dentro do laco ela travava o arranque (ate 9 s em 2026-10-07), e o LiDAR
+    # enchia a fila nesse tempo. Aqui ela acontece com o ESC ainda em neutro.
+    for _ in range(3):
+        engine.infer(np.zeros((3, 66, 200), dtype=np.float32),
+                     np.ones(cfg["n_sectors"], dtype=np.float32))
     actuator = Pca9685Actuator()
     actuator.safe_state()
     logger = RunLogger(a.out, meta={
@@ -375,6 +394,7 @@ def main():
         "lidar_dist_offset_m": a.lidar_dist_offset,
         "steer_span_us": a.steer_span_us, "steer_gain": a.steer_gain,
         "steer_median": a.steer_median,
+        "arranque_s": a.arranque_s,
         "log_inputs": a.log_inputs,
         "self_occlusion": a.self_occlusion,
         "engine": os.path.basename(a.engine),
@@ -387,14 +407,23 @@ def main():
                      lidar_offset_deg=a.lidar_offset_deg,
                      lidar_invert=a.lidar_invert, self_occlusion=arcos,
                      steer_span_us=a.steer_span_us, steer_gain=a.steer_gain,
-                     steer_median=a.steer_median)
+                     steer_median=a.steer_median, arranque_s=a.arranque_s)
+
+    # O LiDAR comecou a transmitir no SerialLidar(), antes da engine carregar:
+    # o que esta na fila agora e o passado. Fora com ele.
+    lidar.descarta_fila()
+    if a.arranque_s > 0:
+        print("ESC preso em neutro ate {0:.1f} s seguidos de laco saudavel e LiDAR em dia."
+              .format(a.arranque_s))
 
     t_end = time.monotonic() + a.seconds
     n, t_report = 0, time.monotonic()
+    atrasos = 0
     try:
         while time.monotonic() < t_end:
             tele = loop.step()
             n += 1
+            atrasos += int(tele["lidar_atrasado"])
             if time.monotonic() - t_report >= 1.0:
                 fps = n / (time.monotonic() - t_report)
                 alertas = ""
@@ -404,6 +433,10 @@ def main():
                     alertas += "  CAMERA CEGA"
                 if tele["stale_lidar"]:
                     alertas += "  LIDAR VELHO"
+                if atrasos:
+                    alertas += "  LIDAR ATRASADO x{0}".format(atrasos)
+                if not tele["liberado"]:
+                    alertas += "  AGUARDANDO ARRANQUE"
                 # Onde o quadro foi gasto. O laco entrega ~16 Hz e o carro
                 # percorre 9x mais pista por quadro do que o treino viu: a taxa
                 # e a alavanca mais barata, e sem este perfil so da para chutar.
@@ -415,7 +448,7 @@ def main():
                       .format(fps, tele["steer"], tele["servo_us"], tele["esc_us"],
                               alertas, "ok" if tele["has_scan"] else "AGUARDANDO"))
                 print("          ms/quadro: %s  total=%.0f" % (perfil, 1000 * tm.get("total", 0.0)))
-                n, t_report = 0, time.monotonic()
+                n, t_report, atrasos = 0, time.monotonic(), 0
     except KeyboardInterrupt:
         print("\ninterrompido")
     finally:

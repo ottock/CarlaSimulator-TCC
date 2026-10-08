@@ -56,6 +56,15 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 > Depois do `>> 2`, sobrou um excesso **constante de ~1 cm** (trena: 10→11, 15→16;
 > pista: esquerda+direita 0,583 m em 0,56 m). Descontado via `LIDAR_DIST_OFFSET_M = 0.010`
 > em `hardware/jetson_runtime.py`, com as outras calibrações do LiDAR.
+> **Mesmo dia, rodadas `runs/Diag/lidar_x4_2026-10-07_2`: o LiDAR chegava ATRASADO no arranque.**
+> O laço travava no início (até 9 s), a serial enchia, e a leitura pegava ~4 KB por quadro
+> (limite do N_TTY): 30–33 voltas por meio segundo saindo da fila contra 5 produzidas. O modelo
+> recebeu o LiDAR de segundos atrás enquanto o carro já andava; 3 das 4 batidas no primeiro meio
+> metro. Replay ONNX nas entradas gravadas (fidelidade 0,0002–0,0007): nesses trechos quem
+> decidia era a câmera — congelada a câmera o esterço fica estável, congelado o LiDAR nada muda.
+> O servo NÃO está invertido (ICP nos scans: o carro gira para o lado comandado). Corrigido:
+> leitura que esvazia a fila (`ai/car/serial_io.py`), inferência de aquecimento, fila descartada
+> antes do laço, e ESC preso até 1 s de laço saudável sem fila (`--arranque-s`).
 
 **Marco da Fase 2 (`cam_v2.pt`):** modelo só-câmera dirige **~171 s** centrado a
 ~0.08 m no Town01. Open-loop `val_MAE 0.044`, `var_ratio 1.00`.
