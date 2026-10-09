@@ -65,6 +65,16 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 > O servo NÃO está invertido (ICP nos scans: o carro gira para o lado comandado). Corrigido:
 > leitura que esvazia a fila (`ai/car/serial_io.py`), inferência de aquecimento, fila descartada
 > antes do laço, e ESC preso até 1 s de laço saudável sem fila (`--arranque-s`).
+>
+> **2026-10-07 — o v2 deu ~6 voltas no oval real** (3 × 60 s, sentido horário, oposto ao do
+> treino: quem permite é o espelho). Raspões só na RETA após cada curva, na parede externa: a
+> linha de treino deixa o flanco a 2,1 cm dela (`--margem 0`). 65 aproximações, 19 encostadas.
+>
+> **2026-10-09 — `driving_oval_v4` = v2 + `--margem 0.36` (3 cm no carro), e nada mais.** Mesma
+> coleta (`--episodes-por-pista 16 --seconds 60 --recovery --seed 1`), mesmo treino do zero, com
+> as faixas fotométricas do v2 (`--faixas-fotometricas v2`). Coleta: 94% dos quadros aproveitados
+> contra 77% no v2, mesma semente. CARLA, malha fechada, mesma sessão: v2 máx. 1,78 m do eixo (flanco
+> a 1,2 cm da parede no carro), v4 máx. 1,49 m (3,6 cm), os dois limpos. Falta o teste na pista real.
 
 **Marco da Fase 2 (`cam_v2.pt`):** modelo só-câmera dirige **~171 s** centrado a
 ~0.08 m no Town01. Open-loop `val_MAE 0.044`, `var_ratio 1.00`.
