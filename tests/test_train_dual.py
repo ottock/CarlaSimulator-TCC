@@ -47,3 +47,23 @@ def test_train_dual_records_no_fov_when_full_360(tmp_path):
     train_dual(str(tmp_path), str(out), epochs=1, batch=4, workers=0, device="cpu")
     state = torch.load(str(out), map_location="cpu", weights_only=False)
     assert state["fov_deg"] is None
+
+
+def test_train_dual_records_the_photometric_ranges(tmp_path):
+    # O checkpoint diz com que faixas foi treinado: "v2" ou "v3" (ai.augment.FAIXAS).
+    _episode(tmp_path / "ep_0001", 8)
+    _episode(tmp_path / "ep_0002", 8)
+    out = tmp_path / "driving_faixas.pt"
+    train_dual(str(tmp_path), str(out), epochs=1, batch=4, workers=0, device="cpu",
+               photometric=True, faixas_fotometricas="v2")
+    state = torch.load(str(out), map_location="cpu", weights_only=False)
+    assert state["photometric"] is True
+    assert state["photometric_faixas"] == "v2"
+
+
+def test_unknown_photometric_ranges_are_refused(tmp_path):
+    import pytest
+    _episode(tmp_path / "ep_0001", 4)
+    with pytest.raises(SystemExit):
+        train_dual(str(tmp_path), str(tmp_path / "x.pt"), epochs=1, batch=4, workers=0,
+                   device="cpu", photometric=True, faixas_fotometricas="v9")

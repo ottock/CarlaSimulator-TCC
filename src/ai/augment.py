@@ -54,6 +54,19 @@ GAMMA = (0.7, 1.6)           # nao-linearidade, para nao virar so um ajuste afim
 # largura: a media de 4x4 pixels corta o desvio do ruido branco em 4.
 NOISE_STD = (0.0, 14.0)
 
+# As faixas com que cada modelo foi treinado, POR NOME. Um retreino que queira
+# mudar uma coisa so (a margem do traçado, por exemplo) precisa repetir o resto
+# da receita de um modelo anterior -- sem reverter codigo e sem depender de
+# alguem lembrar os numeros. O nome usado vai gravado no checkpoint.
+#   v2: driving_oval_v2, o primeiro a dar voltas no carro (antes do a9fbbc6)
+#   v3: as faixas atuais, alargadas para alcancar o contraste real
+FAIXAS = {
+    "v2": {"contrast": (0.45, 1.15), "brightness": (-50.0, 25.0),
+           "gamma": (0.7, 1.6), "noise_std": (0.0, 0.0)},
+    "v3": {"contrast": CONTRAST, "brightness": BRIGHTNESS,
+           "gamma": GAMMA, "noise_std": NOISE_STD},
+}
+
 
 def photometric_jitter(img_bgr, rng, contrast=CONTRAST, brightness=BRIGHTNESS,
                        gamma=GAMMA, noise_std=NOISE_STD):

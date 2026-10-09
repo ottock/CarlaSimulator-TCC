@@ -48,12 +48,14 @@ class DrivingDataset(Dataset):
     """
 
     def __init__(self, index, max_range=12.0, fov_deg=None, photometric=False,
-                 mirror=False):
+                 mirror=False, faixas=None):
         self.index = index
         # Aumento fotometrico: SO no split de treino. Na validacao ele tornaria
         # o val_MAE incomparavel com as fases anteriores e mediria o aumento,
         # nao o modelo.
         self.photometric = photometric
+        # Faixas do aumento (ver ai.augment.FAIXAS). None = as atuais do modulo.
+        self.faixas = dict(faixas) if faixas else {}
         # Espelho horizontal (ver ai.mirror). O oval vira so para um lado --
         # 14.364 quadros negativos contra 36 positivos -- e sem isto a rede
         # aprende 'sempre vire para a esquerda'. So no split de treino.
@@ -81,7 +83,7 @@ class DrivingDataset(Dataset):
             # rng nova por amostra: com num_workers > 0 uma rng compartilhada
             # faria os workers sortearem a MESMA sequencia, e o aumento perderia
             # variedade sem dar sinal nenhum de que isso aconteceu.
-            img_bgr = photometric_jitter(img_bgr, np.random.default_rng())
+            img_bgr = photometric_jitter(img_bgr, np.random.default_rng(), **self.faixas)
         x = preprocess(img_bgr)
         sectors_m = np.asarray(self._lidar_array(rec["lidar"])[rec["row"]], dtype=np.float32)
         if self.fov_deg is not None:

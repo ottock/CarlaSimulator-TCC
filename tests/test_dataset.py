@@ -131,3 +131,32 @@ def test_photometric_augmentation_only_changes_the_image(tmp_path):
     assert torch.allclose(limpo[1], aug[1])              # o LiDAR nao
     assert torch.allclose(limpo[2], aug[2])              # o alvo nao
     assert limpo[0].shape == aug[0].shape == (3, 66, 200)
+
+
+def test_the_dataset_applies_the_chosen_photometric_ranges(tmp_path, monkeypatch):
+    """As faixas escolhidas chegam de fato ao aumento -- senao o v4 treinaria
+    com as faixas atuais achando que repete as do v2."""
+    import cv2
+
+    import ai.dataset as mod
+    from ai.augment import FAIXAS
+    from ai.dataset import DrivingDataset
+
+    ep = tmp_path / "ep_0000"
+    (ep / "frames").mkdir(parents=True)
+    cv2.imwrite(str(ep / "frames" / "000000.jpg"), np.full((360, 640, 3), 90, np.uint8))
+    np.save(str(ep / "lidar.npy"), np.full((1, 72), 6.0, dtype=np.float32))
+    rec = [{"image": str(ep / "frames" / "000000.jpg"), "lidar": str(ep / "lidar.npy"),
+            "row": 0, "steer": 0.0, "throttle": 0.5, "brake": 0.0}]
+
+    vistos = []
+
+    def espiao(img, rng, **kw):
+        vistos.append(kw)
+        return img
+
+    monkeypatch.setattr(mod, "photometric_jitter", espiao)
+    DrivingDataset(rec, photometric=True, faixas=FAIXAS["v2"])[0]
+    DrivingDataset(rec, photometric=True)[0]
+    assert vistos[0] == FAIXAS["v2"]
+    assert vistos[1] == {}                       # sem escolha: as faixas do modulo

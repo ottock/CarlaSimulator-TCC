@@ -91,3 +91,21 @@ def test_the_ranges_now_reach_the_contrast_the_car_really_produces():
     assert CONTRAST[0] <= 17.3 / 58.2, (
         "contraste minimo %.2f nao alcanca o %.2f que o carro entrega"
         % (CONTRAST[0], 17.3 / 58.2))
+
+
+# ---------------------------------------------------------------------------
+# Faixas por nome (2026-10-09): retreinar mudando UMA coisa so
+# ---------------------------------------------------------------------------
+
+def test_the_v2_ranges_are_the_ones_driving_oval_v2_was_trained_with():
+    # Lidos de `git show 2dd78f2:src/ai/augment.py`. Se mudarem, o v4 deixa de
+    # repetir a receita do v2 e o teste da margem passa a medir duas coisas.
+    from ai.augment import FAIXAS
+    assert FAIXAS["v2"] == {"contrast": (0.45, 1.15), "brightness": (-50.0, 25.0),
+                            "gamma": (0.7, 1.6), "noise_std": (0.0, 0.0)}
+
+
+def test_the_v3_ranges_are_the_current_defaults():
+    from ai.augment import BRIGHTNESS, CONTRAST, FAIXAS, GAMMA, NOISE_STD
+    assert FAIXAS["v3"] == {"contrast": CONTRAST, "brightness": BRIGHTNESS,
+                            "gamma": GAMMA, "noise_std": NOISE_STD}

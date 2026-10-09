@@ -23,6 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
+from ai.augment import FAIXAS
 from ai.dataset import DrivingDataset, SteeringDataset
 from ai.dataset_index import (
     build_index,
@@ -131,7 +132,11 @@ def _evaluate_dual(model, loader, device):
 def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4,
                weight_decay=1e-5, dropout=0.3, val_frac=0.2, seed=0, workers=0,
                limit=0, patience=6, w_steer=1.0, w_throttle=0.5, w_brake=1.0,
-               fov_deg=None, photometric=False, mirror=False, device=None):
+               fov_deg=None, photometric=False, mirror=False, device=None,
+               faixas_fotometricas="v3"):
+    if faixas_fotometricas not in FAIXAS:
+        raise SystemExit("faixas fotometricas desconhecidas: %r (use %s)"
+                         % (faixas_fotometricas, ", ".join(sorted(FAIXAS))))
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(seed)
 
@@ -155,12 +160,15 @@ def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4
     # mediria uma entrada que o carro nunca vai receber.
     train_loader = DataLoader(DrivingDataset(train_index, fov_deg=fov_deg,
                                             photometric=photometric,
-                                            mirror=mirror), batch_size=batch,
+                                            mirror=mirror,
+                                            faixas=FAIXAS[faixas_fotometricas]),
+                              batch_size=batch,
                               sampler=sampler, num_workers=workers, pin_memory=True, drop_last=True)
     val_loader = DataLoader(DrivingDataset(val_index, fov_deg=fov_deg), batch_size=batch,
                             shuffle=False, num_workers=workers, pin_memory=True)
     if photometric:
-        print("aumento fotometrico LIGADO no treino (val fica limpa, para comparar)")
+        print("aumento fotometrico LIGADO no treino, faixas '%s' %s (val fica limpa, "
+              "para comparar)" % (faixas_fotometricas, FAIXAS[faixas_fotometricas]))
     if mirror:
         print("espelho horizontal LIGADO no treino: o oval so vira para um lado "
               "(14.364 quadros negativos contra 36 positivos) e sem isto a rede "
@@ -205,7 +213,8 @@ def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4
                         "var_ratio": vr, "epoch": epoch, "arch": "DrivingNet",
                         "fov_deg": fov_deg,
                         "photometric": photometric,
-                    "mirror": mirror}, out_path)
+                        "photometric_faixas": (faixas_fotometricas if photometric else None),
+                        "mirror": mirror}, out_path)
             flag = " *"
         else:
             since_best += 1
@@ -244,6 +253,10 @@ def main():
     p.add_argument("--photometric", action="store_true",
                    help="Aumento de brilho/contraste/gama no treino, para cobrir a "
                         "luz da pista real (medida: metade do contraste do simulador)")
+    p.add_argument("--faixas-fotometricas", default="v3", choices=sorted(FAIXAS),
+                   help="Faixas do aumento fotometrico (ai.augment.FAIXAS). 'v2' repete "
+                        "a receita do driving_oval_v2; 'v3' sao as atuais. Vai gravado "
+                        "no checkpoint.")
     p.add_argument("--fov-deg", type=float, default=None,
                    help="Campo de visao frontal do LiDAR em graus (ex.: 180 = traseira cega "
                         "pela carroceria). Padrao: 360 (sem mascara). Vai gravado no checkpoint.")
@@ -254,7 +267,8 @@ def main():
                    seed=a.seed, workers=a.workers, limit=a.limit, patience=a.patience,
                    w_steer=a.w_steer, w_throttle=a.w_throttle, w_brake=a.w_brake,
                    fov_deg=a.fov_deg, photometric=a.photometric,
-                   mirror=a.mirror, device=a.device)
+                   mirror=a.mirror, device=a.device,
+                   faixas_fotometricas=a.faixas_fotometricas)
         return
     train(a.data, a.out, a.epochs, a.batch, a.lr, a.weight_decay, a.dropout,
           a.val_frac, a.seed, a.workers, a.limit, a.patience, a.device)
