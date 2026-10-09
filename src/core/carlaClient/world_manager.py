@@ -34,23 +34,7 @@ def simulation_context(
 
     # Load desired map (if provided)
     map_name = world_config.get("map_name")
-    if map_name:
-        logger.info(f"Loading map: {map_name}")
-        max_load_retries = 3
-        for attempt in range(1, max_load_retries + 1):
-            try:
-                world = client.load_world(map_name)
-                logger.info(f"Successfully loaded map: {map_name}")
-                break
-            except RuntimeError as e:
-                logger.warning(f"Failed to load map attempt {attempt}/{max_load_retries}: {e}")
-                if attempt < max_load_retries:
-                    logger.info("Retrying in 3 seconds...")
-                    time.sleep(3)
-                else:
-                    raise RuntimeError(f"Failed to load map '{map_name}' after {max_load_retries} attempts: {e}") from e
-    else:
-        world = client.get_world()
+    world = _preparar_mundo(client, map_name) if map_name else client.get_world()
 
     original_settings = world.get_settings()
     actor_list: list = []
@@ -70,6 +54,56 @@ def simulation_context(
         world.apply_settings(original_settings)
         _destroy_actors(client, actor_list)
         logger.info("Simulation cleaned up")
+
+
+# Atores que NOS criamos (veiculos, sensores, pedestres, props da pista). O mapa
+# em si nao e ator, e semaforos/placas sao do mapa: nao entram aqui.
+_RESTOS = ("sensor.*", "vehicle.*", "walker.*", "static.prop.*")
+
+
+def _mesmo_mapa(nome_atual: str, pedido: str) -> bool:
+    """'Carla/Maps/Town10HD_Opt' e 'Town10HD_Opt' sao o mesmo mapa."""
+    return nome_atual.rstrip("/").split("/")[-1] == pedido.rstrip("/").split("/")[-1]
+
+
+def _preparar_mundo(client, map_name: str, max_load_retries: int = 3):
+    """Devolve o mundo com ``map_name``, recarregando SO se for outro mapa.
+
+    Por que nao recarregar sempre (2026-10-09): o servidor ja sobe com o
+    Town10HD, e ``load_world`` por cima dele faz a GPU segurar o mapa velho e o
+    novo ao mesmo tempo. Numa RTX 3070 de 8 GB isso derrubou o CARLA duas vezes
+    seguidas com "Out of video memory" -- e o cliente so via um time-out.
+
+    Reaproveitar tem um risco que o recarregamento escondia: atores de uma
+    execucao que caiu no meio. Paredes de pista duplicadas fariam o expert
+    colidir com fantasmas e estragariam a coleta em silencio, entao os restos
+    que nos criamos sao removidos aqui.
+    """
+    atual = client.get_world()
+    if _mesmo_mapa(atual.get_map().name, map_name):
+        restos = [a for padrao in _RESTOS for a in atual.get_actors().filter(padrao)]
+        for ator in restos:
+            try:
+                ator.destroy()
+            except RuntimeError:
+                pass
+        logger.info("Mapa %s ja carregado: reaproveitado sem recarregar "
+                    "(%d atores de execucoes anteriores removidos)", map_name, len(restos))
+        return atual
+
+    logger.info(f"Loading map: {map_name}")
+    for attempt in range(1, max_load_retries + 1):
+        try:
+            world = client.load_world(map_name)
+            logger.info(f"Successfully loaded map: {map_name}")
+            return world
+        except RuntimeError as e:
+            logger.warning(f"Failed to load map attempt {attempt}/{max_load_retries}: {e}")
+            if attempt < max_load_retries:
+                logger.info("Retrying in 3 seconds...")
+                time.sleep(3)
+            else:
+                raise RuntimeError(f"Failed to load map '{map_name}' after {max_load_retries} attempts: {e}") from e
 
 
 def connect_to_carla(carla_config: dict) -> carla.Client:
