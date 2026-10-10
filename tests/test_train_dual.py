@@ -92,3 +92,15 @@ def test_fine_tuning_refuses_a_different_fov(tmp_path):
     with pytest.raises(SystemExit):
         train_dual(str(tmp_path), str(tmp_path / "x.pt"), epochs=1, batch=4, workers=0,
                    device="cpu", fov_deg=120.0, continuar_de=str(base))
+
+
+def test_training_from_the_image_cache_writes_a_checkpoint(tmp_path):
+    # O cache (ai.cache_imagens) e montado na primeira vez e usado nos dois splits.
+    from ai.cache_imagens import nome_cache
+    _episode(tmp_path / "ep_0001", 8)
+    _episode(tmp_path / "ep_0002", 8)
+    out = tmp_path / "cache.pt"
+    train_dual(str(tmp_path), str(out), epochs=1, batch=4, workers=0, device="cpu",
+               fov_deg=180.0, cache_imagens=True)
+    assert out.exists()
+    assert (tmp_path / "ep_0001" / nome_cache()).exists()

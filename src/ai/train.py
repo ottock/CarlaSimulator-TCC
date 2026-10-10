@@ -35,6 +35,7 @@ from ai.dataset_index import (
 from ai.metrics import mae, variance_ratio
 from ai.model import CameraSteeringNet, DrivingNet
 from ai.warmstart import load_camera_backbone
+from ai.cache_imagens import DrivingDatasetCache, constroi_cache
 
 
 def _evaluate(model, loader, device):
@@ -133,7 +134,7 @@ def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4
                weight_decay=1e-5, dropout=0.3, val_frac=0.2, seed=0, workers=0,
                limit=0, patience=6, w_steer=1.0, w_throttle=0.5, w_brake=1.0,
                fov_deg=None, photometric=False, mirror=False, device=None,
-               faixas_fotometricas="v3", continuar_de=None):
+               faixas_fotometricas="v3", continuar_de=None, cache_imagens=False):
     if faixas_fotometricas not in FAIXAS:
         raise SystemExit("faixas fotometricas desconhecidas: %r (use %s)"
                          % (faixas_fotometricas, ", ".join(sorted(FAIXAS))))
@@ -152,20 +153,32 @@ def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4
     print("device=%s | episodes: %d train / %d val | frames: %d train / %d val"
           % (device, len(train_eps), len(val_eps), len(train_index), len(val_index)))
 
+    # Cache das imagens recortadas (ai.cache_imagens): o JPEG + aumento na imagem
+    # grande custavam 16 ms por amostra e a placa ficava ociosa; com o cache, 0,5.
+    Conjunto = DrivingDataset
+    if cache_imagens:
+        t0 = time.time()
+        n_cache = constroi_cache(train_eps + val_eps, workers=max(int(workers), 4))
+        print("cache de imagens: %d quadros prontos em %.0f s" % (n_cache, time.time() - t0))
+        Conjunto = DrivingDatasetCache
     w = sample_weights_dual([r["steer"] for r in train_index],
                             [r["brake"] for r in train_index])
     sampler = WeightedRandomSampler(torch.as_tensor(w, dtype=torch.double),
                                     num_samples=len(w), replacement=True)
     # O MESMO fov_deg nos dois splits: validar com 360 um modelo treinado a 180
     # mediria uma entrada que o carro nunca vai receber.
-    train_loader = DataLoader(DrivingDataset(train_index, fov_deg=fov_deg,
+    train_loader = DataLoader(Conjunto(train_index, fov_deg=fov_deg,
                                             photometric=photometric,
                                             mirror=mirror,
                                             faixas=FAIXAS[faixas_fotometricas]),
                               batch_size=batch,
-                              sampler=sampler, num_workers=workers, pin_memory=True, drop_last=True)
-    val_loader = DataLoader(DrivingDataset(val_index, fov_deg=fov_deg), batch_size=batch,
-                            shuffle=False, num_workers=workers, pin_memory=True)
+                              sampler=sampler, num_workers=workers, pin_memory=True, drop_last=True,
+                              persistent_workers=workers > 0)
+    # persistent_workers: no Windows cada epoca recriava os processos auxiliares
+    # (spawn reimporta tudo) e eles reabriam os arquivos do zero.
+    val_loader = DataLoader(Conjunto(val_index, fov_deg=fov_deg), batch_size=batch,
+                            shuffle=False, num_workers=workers, pin_memory=True,
+                            persistent_workers=workers > 0)
     if photometric:
         print("aumento fotometrico LIGADO no treino, faixas '%s' %s (val fica limpa, "
               "para comparar)" % (faixas_fotometricas, FAIXAS[faixas_fotometricas]))
@@ -256,6 +269,9 @@ def main():
     p.add_argument("--device", default=None)
     p.add_argument("--dual", action="store_true", help="Train the dual-input DrivingNet (Fase 3)")
     p.add_argument("--init-from", default=None, help="Camera checkpoint to warm-start from (cam_v2.pt)")
+    p.add_argument("--cache-imagens", action="store_true",
+                   help="le as imagens de um cache ja recortado (~31x mais rapido; "
+                        "monta o cache na primeira vez, ~1 ms por quadro)")
     p.add_argument("--continuar-de", default=None, metavar="CKPT",
                    help="DrivingNet inteiro para ajuste fino (rodadas de DAgger)")
     p.add_argument("--w-steer", type=float, default=1.0)
@@ -283,7 +299,8 @@ def main():
                    w_steer=a.w_steer, w_throttle=a.w_throttle, w_brake=a.w_brake,
                    fov_deg=a.fov_deg, photometric=a.photometric,
                    mirror=a.mirror, device=a.device,
-                   faixas_fotometricas=a.faixas_fotometricas, continuar_de=a.continuar_de)
+                   faixas_fotometricas=a.faixas_fotometricas, continuar_de=a.continuar_de,
+                   cache_imagens=a.cache_imagens)
         return
     train(a.data, a.out, a.epochs, a.batch, a.lr, a.weight_decay, a.dropout,
           a.val_frac, a.seed, a.workers, a.limit, a.patience, a.device)
