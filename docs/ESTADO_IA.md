@@ -81,7 +81,12 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 >   expert vivia no batente, inclusive no oval. Agora a roda física vai a 32,7° e "esterço 1" segue
 >   = 27° efetivos = raio do carro real (`steer_scale.sim_physical_max_steer_deg`): raio medido
 >   5,68 m contra 5,82 esperado. O expert saiu do batente, mas o Pure Pursuit ainda corta as curvas
->   (4,5–7 cm de erro) — o próximo passo é um seguidor de linha melhor.
+>   (4,5–7 cm de erro).
+> - **Seguidor de linha** (`ai/seguidor.py`, `--controlador seguidor`): antecipa a curvatura da
+>   linha e corrige erro lateral e de rumo. No CARLA calibrado: **0,7 cm** de erro no pior ponto das
+>   pistas abertas difíceis, contra 6–7 cm do Pure Pursuit. Coleta do v6 (gêmeo calibrado + seguidor,
+>   mesma receita do v5): 97,6% dos quadros aproveitados contra 94,3% do v5 →
+>   `D:/tcc_data/dataset_grade_v6`, modelo `driving_grade_v6`.
 > - Coleta do v5: `--pistas "oval_tcc*16,grade:treino" --episodes-por-pista 2 --seconds 60
 >   --tracado geral --margem 0.36 --recovery --seed 1` → `D:/tcc_data/dataset_grade_v5`.
 
