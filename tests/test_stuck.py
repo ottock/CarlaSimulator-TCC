@@ -59,3 +59,36 @@ def test_the_speed_threshold_is_respected():
 def test_a_window_of_zero_is_refused():
     with pytest.raises(ValueError):
         StuckDetector(v_min=0.3, steps=0)
+
+
+# ---------------------------------------------------------------------------
+# Janela depois de um toque (2026-10-09)
+# ---------------------------------------------------------------------------
+from ai.stuck import JanelaDeColisao  # noqa: E402
+
+
+def test_frames_right_after_a_touch_are_dropped():
+    j = JanelaDeColisao(20)
+    j.atualiza(3, passo=100)
+    assert j.batendo(100) and j.batendo(119)
+    assert not j.batendo(120)
+    assert j.toques == 3
+
+
+def test_a_touch_late_in_one_episode_does_not_drop_the_next_one():
+    # O bug: passo 1100 no episodio anterior, e o novo comeca no passo 0.
+    j = JanelaDeColisao(20)
+    j.atualiza(5, passo=1100)
+    j.reinicia(n_eventos=5)
+    assert not j.batendo(0)
+    assert j.toques == 0
+
+
+def test_a_new_sensor_starts_counting_from_zero_again():
+    # Pista nova = sensor novo, lista de eventos vazia: a contagem velha (842)
+    # impedia de registrar qualquer toque.
+    j = JanelaDeColisao(20)
+    j.atualiza(842, passo=50)
+    j.reinicia(n_eventos=0)
+    j.atualiza(1, passo=7)
+    assert j.batendo(8) and j.toques == 1

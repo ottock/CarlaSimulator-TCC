@@ -66,8 +66,8 @@ def test_tracks_the_stadium_cannot_draw(codigo):
 def test_an_open_track_starts_on_the_axis_pointing_along_it():
     eixo = _eixo("grade:SDSES")
     c = tracado_geral(eixo, False, HW, W, L, MARGEM, raio_ref=R_CARRO)
-    assert np.allclose(c[:2, :2], eixo[:2, :2], atol=1e-9)
-    assert len(c) == len(eixo)
+    assert np.allclose(c[0, :2], eixo[0, :2], atol=1e-9)
+    assert abs(c[1, 1] - eixo[0, 1]) < 1e-9                 # segundo ponto ainda no eixo
 
 
 def test_an_impossible_corridor_is_refused():
@@ -80,6 +80,17 @@ def test_expert_path_offers_the_general_line_for_open_tracks():
     eixo = [tuple(r) for r in _eixo("grade:SDSES", espac=0.5)]
     c = expert_path(eixo, HW, W, L, margin=MARGEM, min_radius_required=R_CARRO,
                     modo="geral", fechado=False)
-    assert len(c) == len(eixo)
+    assert len(c) > len(eixo)                    # reamostrado de 0,5 m para ~0,26 m
     with pytest.raises(ValueError):
         expert_path(eixo, HW, W, L, margin=MARGEM, modo="estadio", fechado=False)
+
+
+def test_the_line_has_the_stadiums_resolution_whatever_the_axis_spacing():
+    # Com o eixo a cada 0,5 m (o da coleta) o traçado saia com metade dos pontos
+    # do estadio, e o expert batia bem mais. O passo agora e do traçado.
+    grosso = tracado_geral(_eixo("oval_tcc", espac=0.5), True, HW, W, L, MARGEM, raio_ref=R_CARRO)
+    fino = tracado_geral(_eixo("oval_tcc", espac=0.25), True, HW, W, L, MARGEM, raio_ref=R_CARRO)
+    assert abs(len(grosso) - len(fino)) <= 2
+    passo = np.hypot(*np.diff(grosso[:, :2], axis=0).T)
+    assert passo.max() < 0.35                  # antes: ate ~0,6 m por fora da curva
+    assert _uso(grosso, True) == pytest.approx(_uso(fino, True), abs=0.01)

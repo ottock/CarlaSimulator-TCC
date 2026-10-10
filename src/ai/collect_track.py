@@ -35,7 +35,7 @@ import numpy as np
 from ai.dataset_writer import EpisodeWriter, write_meta, LABEL_COLUMNS
 from ai.noise import SteeringNoiseInjector
 from ai.recovery_schedule import RecoveryScheduler
-from ai.stuck import StuckDetector
+from ai.stuck import JanelaDeColisao, StuckDetector
 from ai.report import dataset_report, print_report
 from ai.sim_lidar import points_to_sectors_m
 from ai.racing_line import (MODOS, expert_path, lateral_offset, min_radius_m,
@@ -282,11 +282,9 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
             # preso contamina TODO o resto da coleta em silencio. Medido duas
             # vezes: 11 episodios de 1200 quadros imoveis com "dropped 0".
             travado = StuckDetector(v_min=0.3, steps=int(2.0 / fixed))
-            n_colisoes, ultima_colisao = 0, -10 ** 9
-            # Janela depois do toque: sair raspando tambem nao e exemplo de
-            # recuperacao -- quem manda no carro e a parede, nao o esterco.
-            janela_colisao = int(1.0 / fixed)
-            n_destravadas = 0
+            # Janela depois do toque (ver JanelaDeColisao): reiniciada a cada
+            # episodio -- solta no laco, ela descartava episodios inteiros.
+            janela = JanelaDeColisao(int(1.0 / fixed))
             ruido = SteeringNoiseInjector(
                 dt=fixed, active_fraction=0.3, amplitude=recovery_amp,
                 seed=seed) if recovery else None
@@ -367,12 +365,12 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     kept = dropped = recovered = 0
                     chegou = False
                     col_ini = len(colisoes)
+                    janela.reinicia(len(colisoes))
+                    n_destravadas = 0
                     sched.reset()   # o `step` recomeca em 0: o relogio tem que recomecar junto
                     try:
                         for step in range(steps_per_ep):
-                            if len(colisoes) > n_colisoes:
-                                n_colisoes = len(colisoes)
-                                ultima_colisao = step
+                            janela.atualiza(len(colisoes), step)
                             v_agora = _speed_ms(ego)
                             if travado.update(v_agora):
                                 _destravar(ego, trajeto)
@@ -413,7 +411,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                             # Quadro com o carro parado nao e exemplo de nada: a
                             # imagem nao muda e o rotulo e trava total, porque o
                             # expert continua tentando. Fora do dataset.
-                            batendo = (step - ultima_colisao) < janela_colisao
+                            batendo = janela.batendo(step)
                             if (obs["image"] is not None and dev <= lim_fora
                                     and speed >= 0.3 and not batendo):
                                 lidar_m = points_to_sectors_m(
@@ -439,8 +437,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                                 "".join(
                                     ([] if not n_destravadas
                                      else ["  [%d destravadas]" % n_destravadas])
-                                    + ([] if not n_colisoes
-                                       else ["  [%d toques]" % n_colisoes])
+                                    + ([] if not janela.toques
+                                       else ["  [%d toques]" % janela.toques])
                                     + [_em_que_bateu(colisoes[col_ini:])]))
                     if fechado and kept < 0.5 * steps_per_ep:
                         logger.warning(

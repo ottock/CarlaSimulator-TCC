@@ -67,6 +67,34 @@ def sobra(k, comprimento, largura):
     return (W + k * W * W / 4.0 + k * L * L / 4.0) / (s + 1.0)
 
 
+def _reamostra(eixo, passo, fechado):
+    """Eixo reamostrado a cada ``passo`` metros (interpolacao linear ao longo dele).
+
+    A coleta entrega o eixo a cada 0,5 m (``professor.espacamento``). O traçado
+    sai com a resolucao do eixo, e o Pure Pursuit segue esses pontos: medido em
+    2026-10-09, o oval com 118 pontos aproveitou ~760 quadros por episodio na
+    coleta, contra 1123 do estadio com 240 -- mesma geometria, mesma semente.
+    """
+    e = np.asarray(eixo, dtype=float)
+    xy = e[:, :2]
+    if fechado:
+        if np.allclose(xy[0], xy[-1], atol=1e-6):
+            xy = xy[:-1]
+        xy = np.vstack([xy, xy[:1]])
+    s = np.r_[0.0, np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]
+    n = max(int(round(s[-1] / float(passo))), 5)
+    alvo = np.linspace(0.0, s[-1], n + 1)
+    if fechado:
+        alvo = alvo[:-1]
+    x = np.interp(alvo, s, xy[:, 0])
+    y = np.interp(alvo, s, xy[:, 1])
+    if fechado:
+        tg = np.stack([np.roll(x, -1) - np.roll(x, 1), np.roll(y, -1) - np.roll(y, 1)], 1)
+    else:
+        tg = np.stack([np.gradient(x), np.gradient(y)], 1)
+    return np.c_[x, y, np.arctan2(tg[:, 1], tg[:, 0])]
+
+
 class _Corredor:
     """Eixo + normais; o caminho e ``eixo + a * normal``."""
 
@@ -212,7 +240,7 @@ def _suaviza(cor, a, teto, lim, kref, delta, largada_no_eixo, lam_tv=1.0, iters=
 
 
 def tracado_geral(eixo, fechado, half_width, vehicle_width, vehicle_length, margin,
-                  raio_ref, folga_curvatura=0.03, largada_no_eixo=None):
+                  raio_ref, folga_curvatura=0.03, largada_no_eixo=None, passo=None):
     """Caminho de menor curvatura maxima dentro do corredor.
 
     Args:
@@ -228,10 +256,12 @@ def tracado_geral(eixo, fechado, half_width, vehicle_width, vehicle_length, marg
             esterco (0.03 = 3 pontos percentuais).
         largada_no_eixo: prende os dois primeiros pontos no eixo. Padrao: so em
             pista aberta, onde o carro larga parado no meio da faixa.
+        passo: espacamento do traçado, em metros. Padrao ``half_width / 12``
+            (0,265 m no gemeo, a resolucao do estadio). O eixo e reamostrado.
 
     Returns:
-        ``np.ndarray (n, 3)`` com ``(x, y, yaw)``, no sentido do eixo recebido.
-        No laco o ponto repetido do fim (se houver) sai.
+        ``np.ndarray (n, 3)`` com ``(x, y, yaw)``, no sentido do eixo recebido,
+        com ``n`` dado pelo ``passo`` (nao pelo eixo recebido).
     """
     if largada_no_eixo is None:
         largada_no_eixo = not fechado
@@ -240,6 +270,7 @@ def tracado_geral(eixo, fechado, half_width, vehicle_width, vehicle_length, marg
         raise ValueError("corredor util vazio: faixa de %.2f m, carro de %.2f m, margem %.2f m"
                          % (2 * hw, larg, margin))
     kref = 1.0 / float(raio_ref)
+    eixo = _reamostra(eixo, float(passo) if passo else hw / 12.0, fechado)
     cor = _Corredor(eixo, fechado)
     if cor.n < 5:
         raise ValueError("eixo com %d pontos: curto demais para otimizar" % cor.n)
