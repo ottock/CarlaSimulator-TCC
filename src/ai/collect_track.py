@@ -228,7 +228,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                   launch=True, quality="Low", recovery=False, recovery_every=5.0,
                   recovery_lat=0.7, recovery_yaw=6.0, recovery_min_speed=1.0, seed=0,
                   tracado="estadio", margem=0.0, recovery_amp=0.2,
-                  empurrar=True, fim_m=4.5, pistas_teste=None):
+                  empurrar=True, fim_m=4.5, pistas_teste=None, dagger=None,
+                  dagger_beta=0.0):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -246,6 +247,9 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         # Pistas SEPARADAS para avaliar generalizacao: o modelo nunca as ve.
         "pistas_teste": list(pistas_teste or []),
         "fim_m": fim_m,
+        # DAgger (2026-10-10): o MODELO dirige e o expert rotula. None = coleta comum.
+        "dagger": (None if not dagger else {"modelo": os.path.basename(str(dagger)),
+                                            "beta": dagger_beta}),
         "escala": track_cfg0.get("escala"),
         "camera": actor_cfg.get("camera", {}),
         "lidar_sectors": {"n_sectors": LIDAR_N_SECTORS, "max_range_m": LIDAR_MAX_RANGE_M},
@@ -291,6 +295,18 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
             sched = RecoveryScheduler(interval_steps=max(1, int(recovery_every / fixed)),
                                       window_steps=int(1.5 / fixed), enabled=recovery)
             rng = random.Random(seed)
+            # DAgger: o v5 imita o expert a 99-100% nas corridas DELE, mas bate quando
+            # dirige sozinho -- um erro pequeno leva a um estado que o expert nunca
+            # visitou, e num "U" a 93% do esterco nao ha reserva para voltar. Aqui o
+            # modelo dirige e o expert diz, em cada estado que o MODELO visitou, o que
+            # deveria ter feito. `dagger_beta` = chance de o expert dirigir um passo.
+            politica = None
+            if dagger:
+                from ai.model_policy import DrivingPolicy
+                politica = DrivingPolicy(dagger)
+                logger.info("DAgger: %s dirige (beta=%.2f), o expert rotula",
+                            os.path.basename(str(dagger)), dagger_beta)
+            rng_dagger = random.Random(seed + 7)
             fator = 12.0 if str(track_cfg0.get("escala", "meio")).lower() == "real" else 1.0
             z_spawn = float(track_cfg0.get("z", 0.05)) * fator + 0.3
 
@@ -368,6 +384,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     janela.reinicia(len(colisoes))
                     n_destravadas = 0
                     sched.reset()   # o `step` recomeca em 0: o relogio tem que recomecar junto
+                    obs_ant = None
+                    passos_modelo = 0
                     try:
                         for step in range(steps_per_ep):
                             janela.atualiza(len(colisoes), step)
@@ -396,7 +414,17 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                             # O rotulo e sempre o esterco LIMPO; o ruido so vai para
                             # o atuador. E isso que transforma a deriva em exemplo
                             # de recuperacao em vez de em ruido no alvo.
-                            if ruido is not None:
+                            # Quem dirige. Encostado na parede, o expert assume:
+                            # esses quadros saem do dataset de qualquer jeito, e o
+                            # modelo raspando so encravaria o carro.
+                            modelo_dirige = (politica is not None and obs_ant is not None
+                                             and not janela.batendo(step)
+                                             and rng_dagger.random() >= dagger_beta)
+                            if modelo_dirige:
+                                ruidando = True
+                                aplicado = max(-1.0, min(1.0, float(politica(obs_ant)[0])))
+                                passos_modelo += 1
+                            elif ruido is not None:
                                 extra, ruidando = ruido.step()
                                 aplicado = max(-1.0, min(1.0, steer + extra))
                             else:
@@ -406,6 +434,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                             world.tick()
 
                             obs = read_observation(ego, sensors)
+                            obs_ant = obs
                             dev, _ = deviation_from_centerline(centerline, tf.location.x, tf.location.y)
                             recovering = ruidando or (empurrar and sched.is_recovering(step))
                             # Quadro com o carro parado nao e exemplo de nada: a
@@ -430,8 +459,10 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                                 break
                     finally:
                         writer.close()
-                    logger.info("  %s ep%d: kept %d (%d recovery), dropped %d%s%s",
+                    logger.info("  %s ep%d: kept %d (%d recovery), dropped %d%s%s%s",
                                 pista, global_ep - 1, kept, recovered, dropped,
+                                "" if politica is None else
+                                "  [modelo dirigiu %d passos]" % passos_modelo,
                                 "" if fechado else ("  [chegou ao fim]" if chegou
                                                     else "  [NAO chegou ao fim]"),
                                 "".join(
@@ -502,6 +533,10 @@ def main():
                    help="teto do empurrao lateral, em metros de simulador")
     p.add_argument("--recovery-yaw", type=float, default=8.0)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--dagger", default=None, metavar="CKPT",
+                   help="DAgger: este modelo dirige e o expert rotula cada quadro")
+    p.add_argument("--dagger-beta", type=float, default=0.0, metavar="B",
+                   help="chance de o expert dirigir cada passo (0 = so o modelo)")
     a = p.parse_args()
 
     if a.report:
@@ -519,7 +554,7 @@ def main():
         recovery_every=a.recovery_every, recovery_lat=a.recovery_lat,
         recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado, margem=a.margem,
         recovery_amp=a.recovery_amp, empurrar=not a.sem_empurrao,
-        fim_m=a.fim_m, pistas_teste=teste)
+        fim_m=a.fim_m, pistas_teste=teste, dagger=a.dagger, dagger_beta=a.dagger_beta)
 
 
 if __name__ == "__main__":

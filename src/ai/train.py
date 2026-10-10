@@ -133,7 +133,7 @@ def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4
                weight_decay=1e-5, dropout=0.3, val_frac=0.2, seed=0, workers=0,
                limit=0, patience=6, w_steer=1.0, w_throttle=0.5, w_brake=1.0,
                fov_deg=None, photometric=False, mirror=False, device=None,
-               faixas_fotometricas="v3"):
+               faixas_fotometricas="v3", continuar_de=None):
     if faixas_fotometricas not in FAIXAS:
         raise SystemExit("faixas fotometricas desconhecidas: %r (use %s)"
                          % (faixas_fotometricas, ", ".join(sorted(FAIXAS))))
@@ -178,9 +178,22 @@ def train_dual(data_dir, out_path, init_from=None, epochs=40, batch=128, lr=1e-4
 
     model = DrivingNet(dropout=dropout).to(device)
     model(torch.zeros(1, 3, 66, 200, device=device), torch.zeros(1, 72, device=device))  # init lazy
+    if init_from and continuar_de:
+        raise SystemExit("--init-from e --continuar-de juntos: escolha um")
     if init_from:
         n = load_camera_backbone(model, init_from, device=device)
         print("warm-start: copied %d camera tensors from %s" % (n, init_from))
+    if continuar_de:
+        # Ajuste fino (2026-10-10): a rede INTEIRA parte de um DrivingNet ja
+        # treinado -- para as rodadas de DAgger, que acrescentam dados ao mesmo
+        # problema. strict: um checkpoint de outra arquitetura tem de falhar alto.
+        estado = torch.load(continuar_de, map_location=device, weights_only=False)
+        if fov_deg is not None and estado.get("fov_deg") not in (None, fov_deg):
+            raise SystemExit("o checkpoint foi treinado com FOV %s, e o treino pede %s"
+                             % (estado.get("fov_deg"), fov_deg))
+        model.load_state_dict(estado["model_state_dict"], strict=True)
+        print("continuando de %s (epoca %s, val_loss %.4f)"
+              % (continuar_de, estado.get("epoch"), float(estado.get("val_loss", float("nan")))))
 
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
@@ -243,6 +256,8 @@ def main():
     p.add_argument("--device", default=None)
     p.add_argument("--dual", action="store_true", help="Train the dual-input DrivingNet (Fase 3)")
     p.add_argument("--init-from", default=None, help="Camera checkpoint to warm-start from (cam_v2.pt)")
+    p.add_argument("--continuar-de", default=None, metavar="CKPT",
+                   help="DrivingNet inteiro para ajuste fino (rodadas de DAgger)")
     p.add_argument("--w-steer", type=float, default=1.0)
     p.add_argument("--w-throttle", type=float, default=0.5)
     p.add_argument("--w-brake", type=float, default=1.0)
@@ -268,7 +283,7 @@ def main():
                    w_steer=a.w_steer, w_throttle=a.w_throttle, w_brake=a.w_brake,
                    fov_deg=a.fov_deg, photometric=a.photometric,
                    mirror=a.mirror, device=a.device,
-                   faixas_fotometricas=a.faixas_fotometricas)
+                   faixas_fotometricas=a.faixas_fotometricas, continuar_de=a.continuar_de)
         return
     train(a.data, a.out, a.epochs, a.batch, a.lr, a.weight_decay, a.dropout,
           a.val_frac, a.seed, a.workers, a.limit, a.patience, a.device)

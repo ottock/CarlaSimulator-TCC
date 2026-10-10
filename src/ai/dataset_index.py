@@ -13,8 +13,19 @@ import numpy as np
 
 
 def list_episodes(dataset_dir):
-    """Return sorted paths of ``ep_*`` episode directories (separator-robust)."""
-    return sorted(str(p) for p in Path(dataset_dir).glob("ep_*") if p.is_dir())
+    """Return sorted paths of ``ep_*`` episode directories (separator-robust).
+
+    Several datasets can be joined with commas (``D:/a,D:/b``) -- e.g. the base
+    collection plus the DAgger rounds, without copying 90k images around. A
+    comma, not ``os.pathsep``: on Windows that is ``;``, and ``:`` is in every
+    drive letter.
+    """
+    out = []
+    for d in str(dataset_dir).split(","):
+        d = d.strip()
+        if d:
+            out.extend(str(p) for p in Path(d).glob("ep_*") if p.is_dir())
+    return sorted(out)
 
 
 def split_episodes(episodes, val_frac=0.2, seed=0):

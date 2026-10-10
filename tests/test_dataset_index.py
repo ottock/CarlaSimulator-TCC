@@ -60,3 +60,12 @@ def test_sample_weights_dual_upweights_curve_and_brake():
     assert w[1] == 3.0          # curva
     assert w[2] == 4.0          # freio
     assert w[3] == 4.0          # curva + freio -> máximo dos dois
+
+
+def test_several_datasets_join_with_commas(tmp_path):
+    from ai.dataset_index import list_episodes
+    for nome in ("a/ep_0000", "a/ep_0001", "b/ep_0000"):
+        (tmp_path / nome).mkdir(parents=True)
+    eps = list_episodes("%s,%s" % (tmp_path / "a", tmp_path / "b"))
+    assert len(eps) == 3
+    assert list_episodes(str(tmp_path / "a")) == sorted(eps[:2])

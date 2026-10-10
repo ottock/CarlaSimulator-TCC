@@ -67,3 +67,28 @@ def test_unknown_photometric_ranges_are_refused(tmp_path):
     with pytest.raises(SystemExit):
         train_dual(str(tmp_path), str(tmp_path / "x.pt"), epochs=1, batch=4, workers=0,
                    device="cpu", photometric=True, faixas_fotometricas="v9")
+
+
+def test_fine_tuning_starts_from_the_whole_trained_net(tmp_path):
+    # Rodadas de DAgger (2026-10-10): a rede inteira parte do modelo anterior.
+    _episode(tmp_path / "ep_0001", 8)
+    _episode(tmp_path / "ep_0002", 8)
+    base = tmp_path / "base.pt"
+    train_dual(str(tmp_path), str(base), epochs=1, batch=4, workers=0, device="cpu", fov_deg=180.0)
+    sd_base = torch.load(base, weights_only=False)["model_state_dict"]
+    fino = tmp_path / "fino.pt"
+    train_dual(str(tmp_path), str(fino), epochs=1, batch=4, workers=0, device="cpu", fov_deg=180.0,
+               lr=0.0, continuar_de=str(base))
+    sd_fino = torch.load(fino, weights_only=False)["model_state_dict"]
+    assert all(torch.allclose(sd_base[k].float(), sd_fino[k].float()) for k in sd_base)
+
+
+def test_fine_tuning_refuses_a_different_fov(tmp_path):
+    import pytest
+    _episode(tmp_path / "ep_0001", 8)
+    _episode(tmp_path / "ep_0002", 8)
+    base = tmp_path / "base.pt"
+    train_dual(str(tmp_path), str(base), epochs=1, batch=4, workers=0, device="cpu", fov_deg=180.0)
+    with pytest.raises(SystemExit):
+        train_dual(str(tmp_path), str(tmp_path / "x.pt"), epochs=1, batch=4, workers=0,
+                   device="cpu", fov_deg=120.0, continuar_de=str(base))
