@@ -41,6 +41,31 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 > Pista: o oval (2 retas longas, 2 curtas, 4 curvas). Qualquer trabalho novo é ADICIONAL e não
 > pode quebrar este caminho.
 
+> ### 🧭 Em andamento (2026-10-09): **qualquer pista** montada no dia
+> **Meta:** alguém monta a pista na hora e o modelo percorre. **Regras do Rafael:** espaço de
+> ~2,5 × 2 m (4 peças × 3), dois tipos de peça (reta de 50 cm; curva de ¼ de disco), faixa
+> **medida 56 cm**, e **toda curva tem uma reta depois, a não ser que seja a última peça**.
+> - **Catálogo** (`ai/pistas_grade.py`): na grade cabem 3 laços e 227 percursos abertos →
+>   **2 formatos fechados** (o oval e o quadrado 3×3) e **104 abertos** contando o sentido =
+>   **33 montagens físicas**. No gêmeo: `--pistas grade:SDSES` (S reta, E/D curva). O sorteio de
+>   teste separa a montagem inteira (espelho e reverso juntos): 88 códigos de treino, 18 de teste.
+> - **Fim da pista aberta:** fechado com **parede branca** igual às laterais; quem para o carro é
+>   o LiDAR — **nenhuma direção livre em ±60° a menos de 0,5 m** (`--beco-dist 0.5` no runtime;
+>   padrão 0 = desligado, o MVP roda igual). Nas rodadas de 2026-10-07: 0 disparos em 7.874
+>   quadros do oval, e parada 0,4–0,5 s antes da emergência no fim do pista2. No gêmeo, a parede
+>   do fim são duas retas giradas 90°.
+> - **Traçado para qualquer pista** (`ai/tracado_geral.py`, `--tracado geral`): o caminho de
+>   menor curvatura máxima no corredor, por programação linear sequencial. No oval reencontra o
+>   estádio do v4 (74%→76% do esterço, 1,29 m do eixo contra 1,30); nas 457 combinações o pior caso
+>   usa 84%, com a folga real do retângulo do carro = a margem pedida (3 cm).
+> - **Dois bugs achados no caminho:** (1) pista aberta largava com o centro do carro na borda da
+>   primeira peça — rodas traseiras no vazio, 1070 toques em 1200 passos; (2) a janela "depois de um
+>   toque" da coleta **nunca era zerada entre episódios** — um toque no fim de um episódio descartava
+>   o seguinte (existia desde a Fase 4; no oval do v4 custou pouco). Com os dois corrigidos, o oval
+>   (16 × 60 s, semente do v4) aproveitou 96,7% dos quadros contra 93,5% do v4.
+> - Coleta do v5: `--pistas "oval_tcc*16,grade:treino" --episodes-por-pista 2 --seconds 60
+>   --tracado geral --margem 0.36 --recovery --seed 1` → `D:/tcc_data/dataset_grade_v5`.
+
 | Fase | O que é | Status |
 |------|---------|--------|
 | **0** | Malha fechada com o expert (harness) | ✅ Feito e validado |
