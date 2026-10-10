@@ -28,6 +28,19 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 
 ## 2. Estado atual (o que funciona)
 
+> ### 🏁 MVP: `driving_oval_v4` (decidido em 2026-10-09)
+> **Se nada mais funcionar, é este que roda na apresentação.** Testado no oval real: voltas
+> seguidas, funcionou muito bem. O MVP é o modelo **e** o código que o rodou — a tag
+> **`mvp-v4`** marca os dois. No dia:
+> ```bash
+> cd ~/CarlaSimulator-TCC && git fetch --tags && git checkout mvp-v4
+> cd models && /usr/src/tensorrt/bin/trtexec --onnx=driving_oval_v4.onnx --saveEngine=driving_oval_v4.engine --fp16 && cd ..
+> python3 hardware/jetson_runtime.py --engine models/driving_oval_v4.engine --config models/driving_oval_v4.json --out runs/apresentacao_$(date +%Y-%m-%d_%H%M%S) --cruise-us 1610
+> ```
+> (Edite `ESC_ARMADO = True` no `jetson_runtime.py` depois do checkout, como sempre.)
+> Pista: o oval (2 retas longas, 2 curtas, 4 curvas). Qualquer trabalho novo é ADICIONAL e não
+> pode quebrar este caminho.
+
 | Fase | O que é | Status |
 |------|---------|--------|
 | **0** | Malha fechada com o expert (harness) | ✅ Feito e validado |
