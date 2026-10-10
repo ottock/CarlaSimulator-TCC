@@ -17,7 +17,7 @@ import numpy as np
 
 from ai.car.control_map import (ESC_NEUTRAL_US, STEER_CENTER_US, FrameWatchdog,
                                SteerMedian, apply_steer_gain, clamp_cruise_us,
-                               front_blocked, steer_to_us)
+                               dead_end, front_blocked, steer_to_us)
 from ai.car.image_crop import prepare_frame
 from ai.car.lidar_frame import drop_self_occlusion, rotate_angles
 from ai.car.scan_assembly import ScanAssembler
@@ -34,7 +34,8 @@ class DriveLoop:
                  cruise_us=ESC_NEUTRAL_US, stop_dist_m=0.25,
                  lidar_offset_deg=0.0, lidar_invert=False, self_occlusion=(),
                  lidar_timeout_s=0.5, steer_span_us=None, steer_gain=1.0,
-                 steer_median=1, arranque_s=0.0, max_voltas_por_leitura=2):
+                 steer_median=1, arranque_s=0.0, max_voltas_por_leitura=2,
+                 beco_dist_m=0.0):
         self.camera = camera
         self.lidar = lidar
         self.engine = engine
@@ -84,6 +85,13 @@ class DriveLoop:
         self.max_voltas_por_leitura = int(max_voltas_por_leitura)
         self._liberado = self.arranque_s <= 0.0
         self._saudavel_desde = None
+        # Fim de pista (2026-10-09): numa pista aberta o carro para quando nao
+        # sobra direcao livre a frente (ver control_map.dead_end). TRAVA: o
+        # beco nao sai do lugar, e soltar o ESC quando uma leitura oscila faria
+        # o carro avancar aos trancos ate a parede. 0 = desligado, que e o
+        # comportamento do MVP no oval.
+        self.beco_dist_m = float(beco_dist_m)
+        self._fim = False
 
     def _sectors_from_scan(self, scan):
         angles = [a for a, _ in scan]
@@ -166,6 +174,12 @@ class DriveLoop:
         # SEGURANCA, nao comportamento aprendido: a cabeca de freio esta inerte.
         blocked = (self._last_vec is not None and
                    front_blocked(self._last_vec, self.stop_dist_m / self.max_range))
+        # So com o LiDAR em dia: travar o fim sobre um vetor velho pararia o
+        # carro para sempre por causa de um lugar onde ele ja nao esta.
+        if (self.beco_dist_m > 0.0 and not self._fim and self._last_vec is not None
+                and not stale_lidar
+                and dead_end(self._last_vec, self.beco_dist_m / self.max_range)):
+            self._fim = True
         if not self._liberado:
             if can_drive and not atrasado:
                 if self._saudavel_desde is None:
@@ -175,7 +189,8 @@ class DriveLoop:
             else:
                 self._saudavel_desde = None
         esc_us = (clamp_cruise_us(self.cruise_us)
-                  if (can_drive and not blocked and self._liberado) else ESC_NEUTRAL_US)
+                  if (can_drive and not blocked and self._liberado and not self._fim)
+                  else ESC_NEUTRAL_US)
 
         _t1 = _t()
         self.actuator.set_servo_us(servo_us)
@@ -187,7 +202,7 @@ class DriveLoop:
             t=now,
             sectors=vec if vec is not None else np.ones(self.n_sectors, dtype=np.float32),
             control=control, servo_us=servo_us, dt=dt, frame_bgr=frame,
-            esc_us=esc_us, blocked=blocked,
+            esc_us=esc_us, blocked=blocked, fim=self._fim,
             model_input=(None if img is None else
                          ((img.transpose(1, 2, 0) + 1.0) * 127.5).astype(np.uint8)))
         # "steer" e o valor CRU do modelo de proposito: o replay_car_log compara
@@ -202,5 +217,5 @@ class DriveLoop:
                 "dt": dt,
                 "stalled": stalled, "has_scan": self._last_vec is not None,
                 "voltas": voltas, "lidar_atrasado": atrasado,
-                "liberado": self._liberado,
+                "liberado": self._liberado, "fim": self._fim,
                 "lidar_vec": vec}

@@ -330,6 +330,13 @@ def main():
                         "em 6 cm para a correcao do LiDAR ser a UNICA mudanca na "
                         "proxima corrida. Com 0.25 reais, a parada dispararia em "
                         "~36%% dos scans das rodadas gravadas, inclusive em curva."),
+    p.add_argument("--beco-dist", type=float, default=0.0,
+                   help="Fim de pista: para (e fica parado) quando TODA direcao "
+                        "dentro de +/-60 graus esta mais perto que isto, em metros. "
+                        "0 = desligado (padrao, o MVP no oval). Para pista aberta "
+                        "terminada em parede use 0.5: nas rodadas de 2026-10-07 "
+                        "nunca disparou no oval (minimo 0.67 m) e parou o pista2 "
+                        "0.4-0.5 s antes da parada de emergencia.")
     p.add_argument("--lidar-offset-deg", type=float, default=LIDAR_OFFSET_DEG,
                    help="Angulo do sensor que aponta para a FRENTE do carro. "
                         "Calibre com um objeto a frente; 0 = sem correcao.")
@@ -364,6 +371,9 @@ def main():
         print("       carro, a janela de 180 graus do modelo olha para o lado errado.")
     print("ESC ARMADO: {0}   cruise={1}us   parada de emergencia: {2:.2f} m"
           .format(ESC_ARMADO, a.cruise_us, a.stop_dist))
+    if a.beco_dist > 0:
+        print("fim de pista: para ao ficar sem saida a menos de {0:.2f} m (+/-60 graus)"
+              .format(a.beco_dist))
     if not ESC_ARMADO:
         print("O carro NAO anda (ESC_ARMADO=False). Rodas no ar mesmo assim.")
     elif a.cruise_us < ESC_MIN_MOVE_US:
@@ -395,6 +405,7 @@ def main():
         "steer_span_us": a.steer_span_us, "steer_gain": a.steer_gain,
         "steer_median": a.steer_median,
         "arranque_s": a.arranque_s,
+        "beco_dist_m": a.beco_dist,
         "log_inputs": a.log_inputs,
         "self_occlusion": a.self_occlusion,
         "engine": os.path.basename(a.engine),
@@ -407,7 +418,8 @@ def main():
                      lidar_offset_deg=a.lidar_offset_deg,
                      lidar_invert=a.lidar_invert, self_occlusion=arcos,
                      steer_span_us=a.steer_span_us, steer_gain=a.steer_gain,
-                     steer_median=a.steer_median, arranque_s=a.arranque_s)
+                     steer_median=a.steer_median, arranque_s=a.arranque_s,
+                     beco_dist_m=a.beco_dist)
 
     # O LiDAR comecou a transmitir no SerialLidar(), antes da engine carregar:
     # o que esta na fila agora e o passado. Fora com ele.
@@ -427,6 +439,8 @@ def main():
             if time.monotonic() - t_report >= 1.0:
                 fps = n / (time.monotonic() - t_report)
                 alertas = ""
+                if tele["fim"]:
+                    alertas += "  FIM DA PISTA"
                 if tele["blocked"]:
                     alertas += "  PARADA"
                 if tele["blind"]:

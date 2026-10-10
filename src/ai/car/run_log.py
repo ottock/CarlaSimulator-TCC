@@ -60,18 +60,21 @@ class RunLogger:
             raise
 
     def log_frame(self, t, sectors, control, servo_us, dt, frame_bgr=None,
-                  esc_us=ESC_NEUTRAL_US, blocked=False, model_input=None):
+                  esc_us=ESC_NEUTRAL_US, blocked=False, model_input=None, fim=False):
         """Record one control cycle. ``control`` is ``(steer, throttle, brake)``.
 
         ``esc_us`` and ``blocked`` matter from the moment the car actually drives:
         without them a run where the emergency stop fired the whole time would look
         identical to a clean one. They default to "stopped, nothing in the way" so
-        the wheels-up phase logs the same shape.
+        the wheels-up phase logs the same shape. ``fim`` marks the dead-end stop
+        (end of an open track), kept apart from ``blocked`` so the analysers can
+        tell "reached the end" from "about to hit something".
         """
         steer, throttle, brake = control
         row = {"t": float(t), "steer": float(steer), "throttle": float(throttle),
                "brake": float(brake), "servo_us": int(servo_us),
-               "esc_us": int(esc_us), "blocked": bool(blocked), "dt": float(dt)}
+               "esc_us": int(esc_us), "blocked": bool(blocked), "fim": bool(fim),
+               "dt": float(dt)}
         self._frames_fh.write(json.dumps(row) + "\n")
         self._sectors.append(np.asarray(sectors, dtype=np.float32))
         if self.log_inputs:

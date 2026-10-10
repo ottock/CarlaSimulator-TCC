@@ -105,7 +105,8 @@ import numpy as np
 import pytest
 
 from ai.car.control_map import (
-    ESC_MAX_US, ESC_MIN_MOVE_US, clamp_cruise_us, front_blocked, front_min,
+    ESC_MAX_US, ESC_MIN_MOVE_US, clamp_cruise_us, dead_end, front_blocked,
+    front_max, front_min,
 )
 
 
@@ -161,6 +162,52 @@ def test_front_blocked_ignores_the_same_obstacle_behind():
 
 def test_front_blocked_is_false_on_a_clear_road():
     assert front_blocked(np.ones(72, dtype=np.float32), threshold=0.25) is False
+
+
+# ---------------------------------------------------------------------------
+# Fim de pista (2026-10-09): parar quando NAO ha direcao livre a frente.
+# ---------------------------------------------------------------------------
+
+def _centros(n=72):
+    c = (np.arange(n) + 0.5) * 360.0 / n
+    return np.where(c > 180.0, c - 360.0, c)
+
+
+def test_a_wall_closing_every_direction_ahead_is_a_dead_end():
+    v = np.ones(72, dtype=np.float32)
+    v[np.abs(_centros()) <= 60.0] = 0.3
+    assert dead_end(v, threshold=0.5) is True
+
+
+def test_a_single_open_direction_ahead_is_not_a_dead_end():
+    # A saida de uma curva: tudo perto, menos o caminho que continua.
+    v = np.ones(72, dtype=np.float32)
+    c = _centros()
+    v[np.abs(c) <= 60.0] = 0.3
+    v[(c > 40.0) & (c < 55.0)] = 0.9
+    assert dead_end(v, threshold=0.5) is False
+
+
+def test_a_missing_return_never_trips_the_dead_end():
+    # Setor sem retorno le 1.0: a regra falha para o lado seguro.
+    v = np.ones(72, dtype=np.float32)
+    c = _centros()
+    v[np.abs(c) <= 60.0] = 0.3
+    v[np.argmin(np.abs(c - 2.5))] = 1.0
+    assert dead_end(v, threshold=0.5) is False
+
+
+def test_the_dead_end_looks_only_at_the_cone():
+    # O que esta ao lado (|angulo| > 60) e atras nao decide nada.
+    v = np.full(72, 0.3, dtype=np.float32)
+    c = _centros()
+    v[np.abs(c) > 60.0] = 1.0
+    assert dead_end(v, threshold=0.5) is True
+    assert front_max(v) == pytest.approx(0.3)
+
+
+def test_the_dead_end_is_false_on_a_clear_road():
+    assert dead_end(np.ones(72, dtype=np.float32), threshold=0.5) is False
 
 
 # ---------------------------------------------------------------------------

@@ -289,3 +289,36 @@ def front_blocked(sectors, threshold, half_angle_deg=FRONT_HALF_ANGLE_DEG):
     normal on a 0.53 m wide track and must not halt the car.
     """
     return bool(front_min(sectors, half_angle_deg) < float(threshold))
+
+
+# Fim de pista (2026-10-09). Uma pista aberta termina numa parede branca, igual
+# as laterais -- para a camera nao ha nada novo. Quem reconhece o fim e o LiDAR,
+# pela geometria: NENHUMA direcao livre a frente. Numa curva sempre sobra uma (a
+# saida); num beco, nao.
+#
+# Usa a MAIOR leitura do cone, nao a menor: um setor sem retorno le 1.0 ("livre")
+# e impede o disparo -- a falha cai do lado seguro, e a parada de emergencia
+# continua valendo. Medido nas rodadas de 2026-10-07 (cone +/-60, limiar
+# 0.50 m): zero disparos em 7874 quadros do oval, onde a menor "maior leitura"
+# foi 0.67 m; no fim do pista2, disparo 0.4-0.5 s antes da parada de emergencia.
+# A versao "frente E os dois lados perto" tambem zerava o oval, mas com a menor
+# leitura: numa reta cruzada na diagonal (o "S") as tres janelas podem ficar
+# perto ao mesmo tempo sem que o caminho acabe.
+DEAD_END_HALF_ANGLE_DEG = 60.0
+
+
+def front_max(sectors, half_angle_deg=DEAD_END_HALF_ANGLE_DEG):
+    """Farthest normalised reading inside the cone (1.0 = some way out is free)."""
+    idx = _front_indices(len(sectors), half_angle_deg)
+    if not idx:
+        return 1.0
+    return float(max(float(sectors[i]) for i in idx))
+
+
+def dead_end(sectors, threshold, half_angle_deg=DEAD_END_HALF_ANGLE_DEG):
+    """True when every direction inside the cone is closed nearer than ``threshold``.
+
+    Sectors outside the model's FOV read 1.0, so a FOV narrower than the cone
+    can never trip it -- deliberately: the rule was measured with FOV 180.
+    """
+    return bool(front_max(sectors, half_angle_deg) < float(threshold))

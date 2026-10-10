@@ -593,3 +593,70 @@ def test_without_the_gate_the_old_behaviour_holds():
     loop, kw = _loop(lidar=GiraSempre(), clock=_relogio(), cruise_us=CRUZEIRO)
     _roda(loop, 2)
     assert kw["actuator"].esc_history[-1] == CRUZEIRO
+
+
+# ---------------------------------------------------------------------------
+# Fim de pista (2026-10-09). Uma pista aberta termina numa parede: o carro para
+# quando nao sobra direcao livre a frente, e fica parado (trava).
+# ---------------------------------------------------------------------------
+
+class Beco(GiraSempre):
+    """Volta a 0.5 m ate o passo ``ate``; dali em diante, parede a ``perto`` m
+    em TODAS as direcoes; e, a partir de ``abre``, tudo livre de novo."""
+
+    def __init__(self, ate=4, perto=0.3, abre=None):
+        GiraSempre.__init__(self)
+        self.ate, self.perto, self.abre = ate, perto, abre
+
+    def read_points(self):
+        pts = GiraSempre.read_points(self)
+        if self.abre is not None and self.passo >= self.abre:
+            return [(a, 2.0) for a, _ in pts]
+        if self.passo >= self.ate:
+            return [(a, self.perto) for a, _ in pts]
+        return pts
+
+
+def test_the_dead_end_is_off_by_default():
+    # O MVP no oval roda sem a regra: nada muda se ninguem pedir.
+    loop, kw = _loop(lidar=Beco(ate=3), clock=_relogio(), cruise_us=CRUZEIRO)
+    teles = _roda(loop, 6)
+    assert kw["actuator"].esc_history[-1] == CRUZEIRO
+    assert teles[-1]["fim"] is False
+
+
+def test_a_dead_end_stops_the_car():
+    loop, kw = _loop(lidar=Beco(ate=4), clock=_relogio(), cruise_us=CRUZEIRO,
+                     beco_dist_m=0.5)
+    teles = _roda(loop, 7)
+    esc = kw["actuator"].esc_history
+    # A volta lida no passo 4 so fecha no wrap seguinte.
+    i = next(k for k, t in enumerate(teles) if t["fim"])
+    assert i == 4
+    assert all(e == CRUZEIRO for e in esc[1:i])    # parede a 0.5 m: ainda ha saida
+    assert all(e == ESC_NEUTRAL_US for e in esc[i:])
+
+
+def test_the_dead_end_stop_holds_even_if_the_reading_clears():
+    # Uma leitura que oscila para "livre" nao pode soltar o carro contra a parede.
+    loop, kw = _loop(lidar=Beco(ate=4, abre=6), clock=_relogio(), cruise_us=CRUZEIRO,
+                     beco_dist_m=0.5)
+    teles = _roda(loop, 9)
+    assert teles[-1]["fim"] is True
+    assert kw["actuator"].esc_history[-1] == ESC_NEUTRAL_US
+
+
+def test_the_servo_keeps_following_the_model_at_the_end():
+    loop, kw = _loop(lidar=Beco(ate=4), clock=_relogio(), cruise_us=CRUZEIRO,
+                     beco_dist_m=0.5)
+    _roda(loop, 6)
+    assert kw["actuator"].servo_history[-1] != STEER_CENTER_US
+
+
+def test_the_end_is_logged_apart_from_the_emergency_stop():
+    loop, kw = _loop(lidar=Beco(ate=4), clock=_relogio(), cruise_us=CRUZEIRO,
+                     beco_dist_m=0.5)
+    _roda(loop, 6)
+    ultimo = kw["logger"].frames[-1]
+    assert ultimo["fim"] is True
+    assert ultimo["blocked"] is False             # 0.3 m nao e emergencia (0.25)
