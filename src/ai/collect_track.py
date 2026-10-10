@@ -41,7 +41,8 @@ from ai.sim_lidar import points_to_sectors_m
 from ai.racing_line import (MODOS, expert_path, lateral_offset, min_radius_m,
                             nudge_bounds)
 from ai.steer_scale import CAR_LENGTH_M, CAR_MIN_RADIUS_M, CAR_WIDTH_M, SCALE
-from ai.track_ref import track_centerline, track_width, deviation_from_centerline
+from ai.track_ref import (track_centerline, track_width, deviation_from_centerline,
+                          ponto_de_largada)
 from ai.pistas_grade import expande_pistas
 from ai.eval_closedloop import _launch_server, _terminate_server, _speed_ms, read_observation
 from ai.eval_closedloop import _attach_collision_sensor
@@ -58,6 +59,9 @@ logger = logging.getLogger("collect_track")
 PIPELINE_VERSION = 1
 LIDAR_MAX_RANGE_M = 12.0
 LIDAR_N_SECTORS = 72
+# Pista com fim: o carro nasce com o centro a 3 m (sim) da borda de entrada --
+# meio Tesla (2,35 m) mais folga, ou ~25 cm no carro real. Ver ponto_de_largada.
+RECUO_LARGADA_M = 3.0
 
 
 def _episode_dir(out_dir, index):
@@ -112,9 +116,45 @@ def _destravar(vehicle, trajeto):
     return True
 
 
-def _volta_ao_inicio(world, vehicle, centerline, z):
-    """Recoloca o ego parado no comeco de uma pista com fim, para o proximo episodio."""
-    x0, y0, yaw0 = centerline[0]
+def pista_e_episodios(item, padrao):
+    """``"oval_tcc*8"`` -> ``("oval_tcc", 8)``; sem ``*`` vale o padrao.
+
+    Para dar a uma pista mais episodios que as outras na MESMA coleta -- o oval do
+    MVP nao pode ficar sub-representado no meio de 90 pistas curtas.
+    """
+    nome, _, n = str(item).partition("*")
+    nome = nome.strip()
+    if not nome:
+        raise ValueError("pista vazia em %r" % (item,))
+    if not n:
+        return nome, int(padrao)
+    if int(n) < 1:
+        raise ValueError("numero de episodios tem de ser >= 1 em %r" % (item,))
+    return nome, int(n)
+
+
+def _em_que_bateu(eventos):
+    """Resumo dos atores tocados num episodio -- '' se nenhum.
+
+    Sem isto o log so dizia "1070 toques", e o primeiro palpite (parede) estava
+    errado: era a borda da laje da primeira peca.
+    """
+    if not eventos:
+        return ""
+    cont = {}
+    for e in eventos:
+        try:
+            nome = e.other_actor.type_id
+        except Exception:
+            nome = "?"
+        cont[nome] = cont.get(nome, 0) + 1
+    top = sorted(cont.items(), key=lambda kv: -kv[1])[:3]
+    return "  [tocou: %s]" % ", ".join("%s x%d" % kv for kv in top)
+
+
+def _volta_ao_inicio(world, vehicle, largada, z):
+    """Recoloca o ego parado na largada de uma pista com fim, para o proximo episodio."""
+    x0, y0, yaw0 = largada
     vehicle.set_transform(carla.Transform(carla.Location(x0, y0, z),
                                           carla.Rotation(yaw=math.degrees(yaw0))))
     try:
@@ -257,7 +297,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
             z_spawn = float(track_cfg0.get("z", 0.05)) * fator + 0.3
 
             global_ep = 0
-            for pista in pistas:
+            for item in pistas:
+                pista, n_eps = pista_e_episodios(item, episodes_por_pista)
                 track_cfg = dict(track_cfg0)
                 track_cfg["preset"] = pista
                 # obstaculos fora na coleta (Pure Pursuit nao desvia deles)
@@ -280,7 +321,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                 # Nasce no EIXO, nao no traçado: o traçado encosta no limite do
                 # corredor e o CARLA recusa o spawn por colisao com a parede. O
                 # Pure Pursuit converge para o traçado nos primeiros metros.
-                x0, y0, yaw0 = centerline[0]
+                x0, y0, yaw0 = (centerline[0] if fechado
+                                else ponto_de_largada(centerline, RECUO_LARGADA_M))
                 spawn_tf = carla.Transform(carla.Location(x0, y0, z_spawn),
                                            carla.Rotation(yaw=math.degrees(yaw0)))
                 # UMA fonte para o esterco: o mesmo numero limita a roda no
@@ -313,15 +355,18 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                              key=lambda i: (trajeto[i][0] - x0) ** 2
                              + (trajeto[i][1] - y0) ** 2)
 
-                for _ep in range(episodes_por_pista):
+                for _ep in range(n_eps):
                     if not fechado and _ep > 0:
-                        _volta_ao_inicio(world, ego, centerline, z_spawn)
-                        pp.idx = 0
+                        _volta_ao_inicio(world, ego, (x0, y0, yaw0), z_spawn)
+                        pp.idx = min(range(len(trajeto)),
+                                     key=lambda i: (trajeto[i][0] - x0) ** 2
+                                     + (trajeto[i][1] - y0) ** 2)
                         travado = StuckDetector(v_min=0.3, steps=int(2.0 / fixed))
                     writer = EpisodeWriter(_episode_dir(out_dir, global_ep))
                     global_ep += 1
                     kept = dropped = recovered = 0
                     chegou = False
+                    col_ini = len(colisoes)
                     sched.reset()   # o `step` recomeca em 0: o relogio tem que recomecar junto
                     try:
                         for step in range(steps_per_ep):
@@ -395,7 +440,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                                     ([] if not n_destravadas
                                      else ["  [%d destravadas]" % n_destravadas])
                                     + ([] if not n_colisoes
-                                       else ["  [%d toques]" % n_colisoes])))
+                                       else ["  [%d toques]" % n_colisoes])
+                                    + [_em_que_bateu(colisoes[col_ini:])]))
                     if fechado and kept < 0.5 * steps_per_ep:
                         logger.warning(
                             "  ep%d aproveitou so %d de %d quadros -- o carro passou "
@@ -420,7 +466,8 @@ def main():
     p.add_argument("--settings", default="settings/pistaTCC.json")
     p.add_argument("--out", default="D:/tcc_data/dataset_track_v1")
     p.add_argument("--pistas", default="pista1,pista2,pista3",
-                   help="Presets separados por virgula. Pistas da grade: "
+                   help="Presets separados por virgula; 'oval_tcc*8' da 8 episodios "
+                        "so a essa pista. Pistas da grade: "
                         "grade:SDSES (codigo), ou os grupos grade:treino, "
                         "grade:teste, grade:fechadas, grade:todas "
                         "(ver ai/pistas_grade.py)")

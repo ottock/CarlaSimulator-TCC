@@ -69,3 +69,24 @@ def deviation_from_centerline(centerline, x, y, start_idx=0, window=0):
     dx, dy = x - wx, y - wy
     lateral = -math.sin(wyaw) * dx + math.cos(wyaw) * dy   # componente 'a direita' do heading
     return abs(lateral), idx
+
+
+def ponto_de_largada(centerline, recuo_m):
+    """Pose do eixo a ``recuo_m`` metros do comeco, interpolada: ``(x, y, yaw)``.
+
+    Pista com fim (2026-10-09): nascer no ponto 0 deixava o centro do carro na
+    BORDA de entrada da primeira peca. As pecas ficam suspensas, e numa pista
+    aberta nao ha nada atras da largada: as rodas traseiras ficavam no vazio e o
+    carro raspava na laje -- 1070 toques em 1200 passos, nenhum quadro util. No
+    laco isso nunca apareceu porque atras da largada vem a ultima peca.
+    """
+    restante = float(recuo_m)
+    for i in range(1, len(centerline)):
+        x0, y0, yaw0 = centerline[i - 1]
+        x1, y1, _ = centerline[i]
+        seg = math.hypot(x1 - x0, y1 - y0)
+        if seg >= restante and seg > 0:
+            f = restante / seg
+            return (x0 + f * (x1 - x0), y0 + f * (y1 - y0), math.atan2(y1 - y0, x1 - x0))
+        restante -= seg
+    raise ValueError("pista mais curta que o recuo de largada (%.2f m)" % float(recuo_m))

@@ -37,3 +37,21 @@ def test_track_centerline_and_width_real():
     dev, _ = deviation_from_centerline(cl, x, y)
     assert dev < 0.05
     assert abs(track_width(cfg) - 0.53 * 12.0) < 1e-6   # LARGURA_PISTA * fator
+
+
+def test_the_start_pose_sits_inside_the_first_piece():
+    import math
+    from ai.track_ref import ponto_de_largada
+    eixo = [(float(i), 0.0, 0.0) for i in range(10)]
+    x, y, yaw = ponto_de_largada(eixo, 2.5)
+    assert (x, y) == (2.5, 0.0) and yaw == 0.0
+    curva = [(math.cos(t), math.sin(t), t + math.pi / 2) for t in [i * 0.1 for i in range(20)]]
+    x, y, yaw = ponto_de_largada(curva, 0.05)
+    assert math.hypot(x - 1.0, y) < 0.06
+
+
+def test_a_track_shorter_than_the_start_offset_is_refused():
+    import pytest
+    from ai.track_ref import ponto_de_largada
+    with pytest.raises(ValueError):
+        ponto_de_largada([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)], 5.0)

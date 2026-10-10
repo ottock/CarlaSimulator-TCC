@@ -33,7 +33,9 @@ from ai.eval_criterio import corrida_limpa, motivo
 from ai.metrics import RouteMetrics
 from ai.model_policy import DrivingPolicy
 from ai.pistas_grade import expande_pistas
-from ai.track_ref import track_centerline, track_width, deviation_from_centerline
+from ai.track_ref import (track_centerline, track_width, deviation_from_centerline,
+                          ponto_de_largada)
+from ai.collect_track import RECUO_LARGADA_M
 from ai.eval_closedloop import (
     _launch_server, _terminate_server, _attach_collision_sensor, read_observation, _speed_ms,
 )
@@ -95,7 +97,8 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                         centerline[i][0] - centerline[i - 1][0],
                         centerline[i][1] - centerline[i - 1][1]))
 
-                x0, y0, yaw0 = centerline[0]
+                x0, y0, yaw0 = (centerline[0] if fechado
+                                else ponto_de_largada(centerline, RECUO_LARGADA_M))
                 spawn_tf = carla.Transform(carla.Location(x0, y0, z_spawn),
                                            carla.Rotation(yaw=math.degrees(yaw0)))
                 # O mesmo limite de esterco do treino. Avaliar com 70 graus um
