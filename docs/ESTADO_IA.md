@@ -87,6 +87,26 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 >   pistas abertas difíceis, contra 6–7 cm do Pure Pursuit. Coleta do v6 (gêmeo calibrado + seguidor,
 >   mesma receita do v5): 97,6% dos quadros aproveitados contra 94,3% do v5 →
 >   `D:/tcc_data/dataset_grade_v6`, modelo `driving_grade_v6`.
+> - **Cache de imagens** (`--cache-imagens`): época de 320 s → 11 s (treino inteiro em ~5 min).
+> - **✅ Resultado no gêmeo CALIBRADO (2026-10-10), 3 fechadas + 18 abertas nunca vistas:**
+>
+>   | | a 2 m/s | a ~2,6 m/s | desvio máx. nas pistas com "S" (2,6 m/s) |
+>   |---|---|---|---|
+>   | **v4** (só oval) | **21/21** | **21/21** | 1,07–1,29 m |
+>   | v5d1 (grade + DAgger) | 21/21 | 21/21 | 1,80–1,87 m |
+>   | v6c (seguidor) | 19/21 | 19/21 | — |
+>
+>   O que derrubava os modelos nas pistas novas era o **carro do sim menos ágil que o real**, não
+>   o modelo. Com o gêmeo calibrado, **o próprio v4 dirige todas as pistas da grade**, centralizado
+>   e com mais folga que os outros. O v6c segue a linha de corrida com precisão — e a linha passa a
+>   3 cm da parede por definição; dirigir centralizado se mostrou mais robusto.
+> - **Próximo passo: teste REAL do v4 numa pista que não é o oval**, com a parede branca no fim e a
+>   parada do beco ligada (o código do carro precisa do branch atual, não da tag `mvp-v4`; desde ela
+>   só entrou o `--beco-dist`, desligado por padrão):
+>   ```bash
+>   python3 hardware/jetson_runtime.py --engine models/driving_oval_v4.engine --config models/driving_oval_v4.json --out runs/grade_$(date +%Y-%m-%d_%H%M%S) --cruise-us 1610 --beco-dist 0.5
+>   ```
+>   Segundo candidato: `models/driving_grade_v5d1.onnx` (paridade ONNX 3,7e-07).
 > - Coleta do v5: `--pistas "oval_tcc*16,grade:treino" --episodes-por-pista 2 --seconds 60
 >   --tracado geral --margem 0.36 --recovery --seed 1` → `D:/tcc_data/dataset_grade_v5`.
 
