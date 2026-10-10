@@ -63,6 +63,14 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 >   toque" da coleta **nunca era zerada entre episódios** — um toque no fim de um episódio descartava
 >   o seguinte (existia desde a Fase 4; no oval do v4 custou pouco). Com os dois corrigidos, o oval
 >   (16 × 60 s, semente do v4) aproveitou 96,7% dos quadros contra 93,5% do v4.
+> - **⚠️ O LiDAR do simulador entregava MEIA volta por quadro** (desde a Fase 3): 10 Hz de rotação
+>   com passo de 0,05 s = 180° por quadro, alternando os lados — num quadro só a frente-esquerda
+>   tinha retorno, no seguinte só a frente-direita (~50% dos setores da frente "livres"). O carro
+>   real só usa voltas completas. **Todo modelo até o v4 treinou assim** (e o v4 dirige no carro
+>   mesmo assim); a regra do beco nunca disparava no sim. Agora a rotação é amarrada ao passo
+>   (`ai.sim_lidar.volta_por_quadro`: 20 Hz, 200 mil pontos/s): setores da frente livres caíram
+>   para 8% (o carro real tem 1–27%), e o beco dispara no fim das pistas abertas e nunca no oval.
+>   A coleta do v5 foi refeita com a volta inteira.
 > - Coleta do v5: `--pistas "oval_tcc*16,grade:treino" --episodes-por-pista 2 --seconds 60
 >   --tracado geral --margem 0.36 --recovery --seed 1` → `D:/tcc_data/dataset_grade_v5`.
 

@@ -42,3 +42,18 @@ def test_empty_cloud_is_all_free():
     sectors = points_to_sectors_m(np.zeros((0, 3), dtype=np.float32))
     assert sectors.shape == (72,)
     assert np.allclose(sectors, 12.0)
+
+
+# Uma volta por quadro (2026-10-09)
+
+def test_the_sim_lidar_turns_once_per_tick():
+    from ai.sim_lidar import volta_por_quadro
+    freq, pps = volta_por_quadro(10, 100000, 0.05)
+    assert freq == 20.0
+    assert pps == 200000.0                       # mesma densidade por grau
+
+
+def test_without_a_fixed_step_the_config_stays():
+    from ai.sim_lidar import volta_por_quadro
+    assert volta_por_quadro(10, 100000, 0.0) == (10.0, 100000.0)
+    assert volta_por_quadro(10, 100000, None) == (10.0, 100000.0)

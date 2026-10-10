@@ -56,9 +56,19 @@ class LidarSensor:
         lidar_bp = blueprint_library.find("sensor.lidar.ray_cast")
 
         # Configure LIDAR from config (with sensible defaults)
+        # UMA volta por quadro (2026-10-09): com 10 Hz e passo de 0,05 s cada
+        # quadro trazia meia volta, e o carro real so usa voltas completas.
+        # Ver ai.sim_lidar.volta_por_quadro.
+        from ai.sim_lidar import volta_por_quadro
+        freq, pps = volta_por_quadro(lidar_config.get("rotation_frequency", 10),
+                                     lidar_config.get("points_per_second", 100000),
+                                     world.get_settings().fixed_delta_seconds)
+        if freq != float(lidar_config.get("rotation_frequency", 10)):
+            logger.info("LIDAR: rotacao %.0f -> %.0f Hz (uma volta por quadro), %.0f pontos/s"
+                        % (float(lidar_config.get("rotation_frequency", 10)), freq, pps))
         lidar_bp.set_attribute("channels", str(lidar_config.get("channels", 32)))
-        lidar_bp.set_attribute("points_per_second", str(lidar_config.get("points_per_second", 100000)))
-        lidar_bp.set_attribute("rotation_frequency", str(lidar_config.get("rotation_frequency", 10)))
+        lidar_bp.set_attribute("points_per_second", str(int(round(pps))))
+        lidar_bp.set_attribute("rotation_frequency", str(freq))
         lidar_bp.set_attribute("range", str(lidar_config.get("range", 100)))
         lidar_bp.set_attribute("upper_fov", str(lidar_config.get("upper_fov", 15)))
         lidar_bp.set_attribute("lower_fov", str(lidar_config.get("lower_fov", -25)))

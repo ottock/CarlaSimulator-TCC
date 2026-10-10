@@ -39,3 +39,25 @@ def points_to_sectors_m(points_xyz, n_sectors=72, max_range=12.0,
 
     angles_deg = np.degrees(np.arctan2(y[keep], x[keep]))
     return scan_to_sectors_m(angles_deg, r[keep], n_sectors=n_sectors, max_range=max_range)
+
+
+def volta_por_quadro(rotation_frequency, points_per_second, fixed_delta_seconds):
+    """``(frequencia, pontos_por_segundo)`` para o LiDAR do sim dar UMA VOLTA por quadro.
+
+    Medido em 2026-10-09, no dataset da grade: com 10 Hz e passo de 0,05 s cada
+    quadro trazia MEIA volta -- num quadro so a frente-esquerda tinha retorno, no
+    seguinte so a frente-direita, e o resto lia "livre". O carro real so usa
+    voltas completas (``ai.car.scan_assembly``). Todo modelo ate o v4 treinou
+    assim, e a regra do beco (que pede TODA a frente fechada) nunca disparava no
+    simulador.
+
+    A frequencia vira ``1 / passo``; os pontos por segundo sobem na mesma
+    proporcao, para a densidade por grau continuar a mesma. Sem passo fixo nao
+    ha como casar, e a configuracao volta intacta.
+    """
+    freq = float(rotation_frequency)
+    pps = float(points_per_second)
+    if not fixed_delta_seconds or fixed_delta_seconds <= 0 or freq <= 0:
+        return freq, pps
+    alvo = 1.0 / float(fixed_delta_seconds)
+    return alvo, pps * alvo / freq
