@@ -49,6 +49,7 @@ from ai.eval_closedloop import _launch_server, _terminate_server, _speed_ms, rea
 from ai.eval_closedloop import _attach_collision_sensor
 from core.carlaClient.track_builder import build_track, pista_fechada
 from core.carlaClient.professor import PurePursuit, _wheelbase
+from ai.seguidor import SeguidorDeLinha
 from core.carlaClient.world_manager import (
     connect_to_carla, simulation_context, spawn_actor_vehicle,
 )
@@ -230,7 +231,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                   recovery_lat=0.7, recovery_yaw=6.0, recovery_min_speed=1.0, seed=0,
                   tracado="estadio", margem=0.0, recovery_amp=0.2,
                   empurrar=True, fim_m=4.5, pistas_teste=None, dagger=None,
-                  dagger_beta=0.0, lookahead=None):
+                  dagger_beta=0.0, lookahead=None, controlador="pp", k_e=2.5):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -249,6 +250,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         "pistas_teste": list(pistas_teste or []),
         "fim_m": fim_m,
         "lookahead_m": float(lookahead if lookahead else prof.get("lookahead", 4.0)),
+        "controlador": controlador,
+        "k_e": (k_e if controlador == "seguidor" else None),
         # DAgger (2026-10-10): o MODELO dirige e o expert rotula. None = coleta comum.
         "dagger": (None if not dagger else {"modelo": os.path.basename(str(dagger)),
                                             "beta": dagger_beta}),
@@ -360,12 +363,22 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                 # -> trava total", que nao e recuperacao, e moagem.
                 colisoes = _attach_collision_sensor(world, ego, pista_actors)
 
-                pp = PurePursuit(
-                    trajeto, wheelbase=_wheelbase(ego),
-                    lookahead=float(lookahead if lookahead else prof.get("lookahead", 4.0)),
-                    target_speed=float(prof.get("target_speed", 3.0)),
-                    k_throttle=float(prof.get("k_throttle", 0.5)),
-                    max_steer_deg=max_steer, fechado=fechado)
+                if controlador == "seguidor":
+                    # Segue a linha de verdade (ver ai.seguidor): o Pure Pursuit
+                    # cortava as curvas e se afastava 4,5-7 cm (no carro) da linha,
+                    # mais que os 3 cm de folga.
+                    pp = SeguidorDeLinha(
+                        trajeto, wheelbase=_wheelbase(ego), max_steer_deg=max_steer,
+                        target_speed=float(prof.get("target_speed", 3.0)),
+                        k_throttle=float(prof.get("k_throttle", 0.5)),
+                        fechado=fechado, k_e=k_e)
+                else:
+                    pp = PurePursuit(
+                        trajeto, wheelbase=_wheelbase(ego),
+                        lookahead=float(lookahead if lookahead else prof.get("lookahead", 4.0)),
+                        target_speed=float(prof.get("target_speed", 3.0)),
+                        k_throttle=float(prof.get("k_throttle", 0.5)),
+                        max_steer_deg=max_steer, fechado=fechado)
                 # O carro nasce no eixo, que pode estar longe do ponto 0 do
                 # traçado. O `_nearest_ahead` so olha 80 pontos a frente do
                 # ultimo indice, entao sem isto ele mira do outro lado da pista
@@ -541,6 +554,11 @@ def main():
     p.add_argument("--lookahead", type=float, default=None, metavar="M",
                    help="mira do Pure Pursuit, em metros de sim (padrao: o do settings, "
                         "4.0). Com 4 m o expert se afasta ate 0,6-0,8 m da propria linha")
+    p.add_argument("--controlador", choices=("pp", "seguidor"), default="pp",
+                   help="expert: 'pp' = Pure Pursuit (o dos modelos ate o v5); "
+                        "'seguidor' = antecipa a curvatura da linha e corrige o erro")
+    p.add_argument("--k-e", type=float, default=2.5,
+                   help="ganho lateral do seguidor (so com --controlador seguidor)")
     p.add_argument("--dagger", default=None, metavar="CKPT",
                    help="DAgger: este modelo dirige e o expert rotula cada quadro")
     p.add_argument("--dagger-beta", type=float, default=0.0, metavar="B",
@@ -563,7 +581,7 @@ def main():
         recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado, margem=a.margem,
         recovery_amp=a.recovery_amp, empurrar=not a.sem_empurrao,
         fim_m=a.fim_m, pistas_teste=teste, dagger=a.dagger, dagger_beta=a.dagger_beta,
-        lookahead=a.lookahead)
+        lookahead=a.lookahead, controlador=a.controlador, k_e=a.k_e)
 
 
 if __name__ == "__main__":
