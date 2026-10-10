@@ -53,7 +53,7 @@ logger = logging.getLogger("eval_track")
 def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0,
                    ablate_lidar=False, realtime=False, follow=True, launch=True,
                    quality="Low", throttle_fixo=0.30, beco=0.5, parada=0.06,
-                   fim_max_m=8.0):
+                   fim_max_m=8.0, velocidade_alvo=None):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -128,7 +128,16 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                     t0 = time.perf_counter()
                     obs = read_observation(ego, sensors)
                     steer, throttle, brake = policy(obs)
-                    if throttle_fixo is not None:
+                    if velocidade_alvo is not None:
+                        # O mesmo P de velocidade do expert (professor.PurePursuit):
+                        # avaliar no ritmo em que o modelo foi treinado. Com o
+                        # acelerador fixo em 0,30 o Tesla chegava a 3-5 m/s, contra
+                        # 1,74 do treino (2026-10-10), e a avaliacao media o atraso
+                        # do esterco, nao o modelo.
+                        err = float(velocidade_alvo) - _speed_ms(ego)
+                        throttle = min(1.0, 0.5 * err) if err >= 0 else 0.0
+                        brake = min(1.0, -0.5 * err) if err < -0.5 else 0.0
+                    elif throttle_fixo is not None:
                         # No carro o acelerador e PWM CONSTANTE e a cabeca de
                         # throttle do modelo e ignorada (o longitudinal ficou
                         # fora do escopo da Fase 6). Avaliar com o throttle da
@@ -218,6 +227,9 @@ def main():
     p.add_argument("--frac-teste", type=float, default=0.15)
     p.add_argument("--semente-split", type=int, default=0)
     p.add_argument("--curva-final", action="store_true")
+    p.add_argument("--velocidade-alvo", type=float, default=None, metavar="V",
+                   help="segura V m/s com o P de velocidade do expert (2.0 = o ritmo "
+                        "da coleta), no lugar do acelerador fixo")
     p.add_argument("--beco", type=float, default=0.5,
                    help="limiar normalizado da regra do beco nas pistas com fim "
                         "(0.5 = 50 cm no carro). 0 desliga.")
@@ -239,7 +251,8 @@ def main():
         settings_path=a.settings, model_ckpt=a.model, pistas=pistas, seconds=a.seconds,
         obstacles=a.obstacles, ablate_lidar=a.ablate_lidar, realtime=a.realtime,
         follow=not a.no_follow, launch=not a.no_launch, quality=a.quality,
-        throttle_fixo=(None if a.throttle_fixo < 0 else a.throttle_fixo), beco=a.beco)
+        throttle_fixo=(None if a.throttle_fixo < 0 else a.throttle_fixo), beco=a.beco,
+        velocidade_alvo=a.velocidade_alvo)
 
 
 if __name__ == "__main__":

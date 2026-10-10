@@ -78,7 +78,7 @@ def test_groups_expand_and_the_test_tracks_stay_out_of_training():
     from ai.pistas_grade import expande_pistas
     treino, teste = expande_pistas("grade:treino", semente=0)
     assert set(treino).isdisjoint(teste)
-    assert "grade:DSDSSDSDSS" in treino and "grade:DSDSDSDS" in treino
+    assert "grade:SSDSDSSDSD" in treino and "grade:SDSDSDSD" in treino
     todas, _ = expande_pistas("grade:todas")
     assert sorted(set(treino) | set(teste)) == sorted(todas)
 
@@ -87,3 +87,12 @@ def test_plain_presets_and_codes_pass_through_once():
     from ai.pistas_grade import expande_pistas
     pistas, _ = expande_pistas("oval_tcc, grade:SDSES,oval_tcc")
     assert pistas == ["oval_tcc", "grade:SDSES"]
+
+
+def test_loops_start_at_the_beginning_of_the_longest_straight():
+    # Nascer dentro de uma curva fazia v4 e v5 baterem no mesmo lugar aos 3,1 s.
+    from ai.pistas_grade import comeca_na_reta
+    assert comeca_na_reta("DSDSSDSDSS") == "SSDSDSSDSD"
+    assert comeca_na_reta("DSDSDSDS") == "SDSDSDSD"
+    fechados, _ = formatos()
+    assert all(c[0] == "S" and c[-1] != "S" for c in fechados)

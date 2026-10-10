@@ -131,6 +131,28 @@ def variantes_curva_final(codigo):
     return [codigo[:-1] + "E", codigo[:-1] + "D"]
 
 
+def comeca_na_reta(codigo):
+    """Laco girado para comecar no inicio da MAIOR sequencia de retas.
+
+    A enumeracao devolve o laco a partir de uma casa qualquer -- o quadrado saia
+    "DSDSDSDS", e o carro nascia dentro de uma curva, no eixo: v4 e v5 batiam no
+    mesmo lugar aos 3,1 s, com numeros identicos (2026-10-10). Na pista real o
+    carro larga numa reta.
+    """
+    n = len(codigo)
+    if "S" not in codigo or "S" * n == codigo:
+        return codigo
+    melhor, melhor_len = 0, -1
+    for i in range(n):
+        if codigo[i] == "S" and codigo[i - 1] != "S":
+            k = 0
+            while codigo[(i + k) % n] == "S":
+                k += 1
+            if k > melhor_len:
+                melhor, melhor_len = i, k
+    return codigo[melhor:] + codigo[:melhor]
+
+
 def formatos(curva_final=False):
     """``(fechados, abertos)``: codigos unicos, ordenados (deterministico).
 
@@ -139,7 +161,7 @@ def formatos(curva_final=False):
     terminam em curva.
     """
     lacos, abertos = enumera()
-    fechados = sorted({tipos(c, True) for c in lacos})
+    fechados = sorted({comeca_na_reta(tipos(c, True)) for c in lacos})
     cods = set()
     for c in abertos:
         cods.add(tipos(c, False))
