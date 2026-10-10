@@ -71,6 +71,17 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 >   (`ai.sim_lidar.volta_por_quadro`: 20 Hz, 200 mil pontos/s): setores da frente livres caíram
 >   para 8% (o carro real tem 1–27%), e o beco dispara no fim das pistas abertas e nunca no oval.
 >   A coleta do v5 foi refeita com a volta inteira.
+> - **Avaliação (2026-10-10, na velocidade do treino):** abertas nunca vistas — v5 14/18, v5+DAgger
+>   14/18, v4 15/18. O v5 falha só nas pistas com "U" logo na largada. Diagnóstico: a linha é
+>   executável (81%), o expert sozinho passa limpo, e o v5 imita o expert a 99–100% quadro a quadro;
+>   mas o expert passa a ~1 cm da parede, porque **o Pure Pursuit se afasta 5–7 cm (no carro) da
+>   própria linha**, mais que os 3 cm de margem.
+> - **⚠️ O Tesla do sim era ~25% menos ágil que o carro real:** com 27° nas rodas ele faz raio de
+>   7,0–7,2 m, não 5,64 (a roda vira ~82% do configurado). A linha "a 76%" era ~100% para ele, e o
+>   expert vivia no batente, inclusive no oval. Agora a roda física vai a 32,7° e "esterço 1" segue
+>   = 27° efetivos = raio do carro real (`steer_scale.sim_physical_max_steer_deg`): raio medido
+>   5,68 m contra 5,82 esperado. O expert saiu do batente, mas o Pure Pursuit ainda corta as curvas
+>   (4,5–7 cm de erro) — o próximo passo é um seguidor de linha melhor.
 > - Coleta do v5: `--pistas "oval_tcc*16,grade:treino" --episodes-por-pista 2 --seconds 60
 >   --tracado geral --margem 0.36 --recovery --seed 1` → `D:/tcc_data/dataset_grade_v5`.
 

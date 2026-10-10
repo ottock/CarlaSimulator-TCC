@@ -33,6 +33,7 @@ from ai.eval_criterio import corrida_limpa, motivo
 from ai.metrics import RouteMetrics
 from ai.model_policy import DrivingPolicy
 from ai.pistas_grade import expande_pistas
+from ai.steer_scale import sim_physical_max_steer_deg
 from ai.track_ref import (track_centerline, track_width, deviation_from_centerline,
                           ponto_de_largada)
 from ai.collect_track import RECUO_LARGADA_M
@@ -105,8 +106,8 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                 # modelo treinado com 30 mediria um carro que nao existe.
                 ego, sensors = spawn_actor_vehicle(
                     world, pista_actors, actor_cfg, spawn_transform=spawn_tf,
-                    max_steer_deg=float(track_cfg0.get("professor", {})
-                                        .get("max_steer_deg", 70.0)))
+                    max_steer_deg=sim_physical_max_steer_deg(float(
+                        track_cfg0.get("professor", {}).get("max_steer_deg", 70.0))))
                 for _ in range(10):
                     world.tick()
                 collisions = _attach_collision_sensor(world, ego, pista_actors)

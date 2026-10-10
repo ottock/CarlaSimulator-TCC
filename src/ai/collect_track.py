@@ -40,7 +40,8 @@ from ai.report import dataset_report, print_report
 from ai.sim_lidar import points_to_sectors_m
 from ai.racing_line import (MODOS, expert_path, lateral_offset, min_radius_m,
                             nudge_bounds)
-from ai.steer_scale import CAR_LENGTH_M, CAR_MIN_RADIUS_M, CAR_WIDTH_M, SCALE
+from ai.steer_scale import (CAR_LENGTH_M, CAR_MIN_RADIUS_M, CAR_WIDTH_M, SCALE,
+                            sim_physical_max_steer_deg)
 from ai.track_ref import (track_centerline, track_width, deviation_from_centerline,
                           ponto_de_largada)
 from ai.pistas_grade import expande_pistas
@@ -229,7 +230,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                   recovery_lat=0.7, recovery_yaw=6.0, recovery_min_speed=1.0, seed=0,
                   tracado="estadio", margem=0.0, recovery_amp=0.2,
                   empurrar=True, fim_m=4.5, pistas_teste=None, dagger=None,
-                  dagger_beta=0.0):
+                  dagger_beta=0.0, lookahead=None):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -247,6 +248,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         # Pistas SEPARADAS para avaliar generalizacao: o modelo nunca as ve.
         "pistas_teste": list(pistas_teste or []),
         "fim_m": fim_m,
+        "lookahead_m": float(lookahead if lookahead else prof.get("lookahead", 4.0)),
         # DAgger (2026-10-10): o MODELO dirige e o expert rotula. None = coleta comum.
         "dagger": (None if not dagger else {"modelo": os.path.basename(str(dagger)),
                                             "beta": dagger_beta}),
@@ -343,9 +345,12 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                 # CARLA e normaliza o Pure Pursuit logo abaixo. Separa-los faz
                 # o expert comandar 1.0 enquanto o carro gira muito mais.
                 max_steer = float(prof.get("max_steer_deg", 70.0))
+                # A roda do CARLA vira so ~82% do configurado (ver steer_scale):
+                # o limite FISICO sobe, e o Pure Pursuit normaliza pelo EFETIVO.
+                max_steer_fisico = sim_physical_max_steer_deg(max_steer)
                 ego, sensors = spawn_actor_vehicle(
                     world, pista_actors, actor_cfg, spawn_transform=spawn_tf,
-                    max_steer_deg=max_steer)
+                    max_steer_deg=max_steer_fisico)
                 for _ in range(10):
                     world.tick()
                 # Sensor de colisao: o empurrao pode por o carro encostado na
@@ -357,7 +362,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
 
                 pp = PurePursuit(
                     trajeto, wheelbase=_wheelbase(ego),
-                    lookahead=float(prof.get("lookahead", 4.0)),
+                    lookahead=float(lookahead if lookahead else prof.get("lookahead", 4.0)),
                     target_speed=float(prof.get("target_speed", 3.0)),
                     k_throttle=float(prof.get("k_throttle", 0.5)),
                     max_steer_deg=max_steer, fechado=fechado)
@@ -533,6 +538,9 @@ def main():
                    help="teto do empurrao lateral, em metros de simulador")
     p.add_argument("--recovery-yaw", type=float, default=8.0)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--lookahead", type=float, default=None, metavar="M",
+                   help="mira do Pure Pursuit, em metros de sim (padrao: o do settings, "
+                        "4.0). Com 4 m o expert se afasta ate 0,6-0,8 m da propria linha")
     p.add_argument("--dagger", default=None, metavar="CKPT",
                    help="DAgger: este modelo dirige e o expert rotula cada quadro")
     p.add_argument("--dagger-beta", type=float, default=0.0, metavar="B",
@@ -554,7 +562,8 @@ def main():
         recovery_every=a.recovery_every, recovery_lat=a.recovery_lat,
         recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado, margem=a.margem,
         recovery_amp=a.recovery_amp, empurrar=not a.sem_empurrao,
-        fim_m=a.fim_m, pistas_teste=teste, dagger=a.dagger, dagger_beta=a.dagger_beta)
+        fim_m=a.fim_m, pistas_teste=teste, dagger=a.dagger, dagger_beta=a.dagger_beta,
+        lookahead=a.lookahead)
 
 
 if __name__ == "__main__":

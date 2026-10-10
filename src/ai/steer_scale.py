@@ -163,3 +163,26 @@ def steering_wheel_indices(max_steer_angles):
             "nenhuma roda com angulo maximo > 0: nao da para calibrar o esterco "
             "deste veiculo (angulos recebidos: {0})".format(list(max_steer_angles)))
     return idx
+
+
+# --- eficiencia do esterco no CARLA, MEDIDA ---
+#
+# 2026-10-10: com 27 graus nas rodas, o Tesla do sim descreve um circulo de
+# 7,0-7,2 m (centro do carro) a 1, 1,7 e 3 m/s -- e nao os 5,82 que a bicicleta
+# preve (5,64 no eixo traseiro). A roda vira de verdade so ~82% do angulo
+# configurado (a fisica do CARLA: Ackermann e curva de esterco). Toda linha "a
+# 76% do esterco" era ~100% para o carro do sim, e o expert vivia no batente --
+# inclusive no oval. Com 32,7 graus fisicos: raio 5,68 m contra 5,82 esperado.
+SIM_STEER_EFFICIENCY = 0.826
+
+
+def sim_physical_max_steer_deg(effective_deg, efficiency=SIM_STEER_EFFICIENCY):
+    """Angulo a CONFIGURAR nas rodas do sim para que elas virem ``effective_deg``.
+
+    O ``max_steer_deg`` do Pure Pursuit continua sendo o EFETIVO (27 graus, o raio
+    do carro real): ``steer = 1`` significa o mesmo raio nos dois mundos. So o
+    limite fisico da roda no CARLA sobe para compensar a perda.
+    """
+    if not 0.0 < float(efficiency) <= 1.0:
+        raise ValueError("eficiencia tem de estar em (0, 1] (recebi %r)" % efficiency)
+    return float(effective_deg) / float(efficiency)

@@ -150,3 +150,13 @@ def test_a_vehicle_with_no_steering_wheels_is_refused():
 
 def test_all_wheel_steering_is_handled():
     assert steering_wheel_indices([50.0, 50.0, 10.0, 10.0]) == [0, 1, 2, 3]
+
+
+def test_the_physical_wheel_angle_compensates_the_measured_loss():
+    # Medido 2026-10-10: 27 graus configurados viravam ~22 efetivos no Tesla.
+    from ai.steer_scale import SIM_STEER_EFFICIENCY, sim_physical_max_steer_deg
+    assert sim_physical_max_steer_deg(27.0) == pytest.approx(27.0 / SIM_STEER_EFFICIENCY)
+    assert 32.0 < sim_physical_max_steer_deg(27.0) < 33.5
+    assert sim_physical_max_steer_deg(27.0, efficiency=1.0) == 27.0
+    with pytest.raises(ValueError):
+        sim_physical_max_steer_deg(27.0, efficiency=0.0)
