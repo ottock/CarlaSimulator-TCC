@@ -22,6 +22,12 @@ def motivo(resumo):
         return "colisoes: %d" % int(resumo["collisions"])
     if int(resumo.get("offlane", 0)) > 0:
         return "saiu da pista em %d passos" % int(resumo["offlane"])
+    if "chegou_ao_fim" in resumo:
+        # Pista com fim (2026-10-09): andar pouco e o normal numa pista curta; o
+        # que conta e ter parado no fim, e nao antes.
+        if not resumo["chegou_ao_fim"]:
+            return "nao chegou ao fim (parou a %.1f m)" % float(resumo.get("restante_m", -1.0))
+        return ""
     if float(resumo.get("mean_speed", 0.0)) < V_MIN_MS:
         return "carro parado ou arrastando (%.2f m/s)" % float(resumo.get("mean_speed", 0.0))
     if float(resumo.get("distance_m", 0.0)) < DIST_MIN_M:

@@ -42,9 +42,10 @@ from ai.racing_line import (MODOS, expert_path, lateral_offset, min_radius_m,
                             nudge_bounds)
 from ai.steer_scale import CAR_LENGTH_M, CAR_MIN_RADIUS_M, CAR_WIDTH_M, SCALE
 from ai.track_ref import track_centerline, track_width, deviation_from_centerline
+from ai.pistas_grade import expande_pistas
 from ai.eval_closedloop import _launch_server, _terminate_server, _speed_ms, read_observation
 from ai.eval_closedloop import _attach_collision_sensor
-from core.carlaClient.track_builder import build_track
+from core.carlaClient.track_builder import build_track, pista_fechada
 from core.carlaClient.professor import PurePursuit, _wheelbase
 from core.carlaClient.world_manager import (
     connect_to_carla, simulation_context, spawn_actor_vehicle,
@@ -70,7 +71,7 @@ def _lidar_points(obs):
     return np.zeros((0, 3), dtype=np.float32)
 
 
-def _trajeto_do_expert(modo, centerline, track_cfg, margem):
+def _trajeto_do_expert(modo, centerline, track_cfg, margem, fechado=True):
     """Caminho que o Pure Pursuit vai perseguir, ja conferido contra o carro.
 
     O eixo da pista exige raio de 3,18 m e o carro faz 5,64 (0,470 medidos x12).
@@ -83,9 +84,9 @@ def _trajeto_do_expert(modo, centerline, track_cfg, margem):
                           vehicle_length=CAR_LENGTH_M * SCALE,
                           margin=margem,
                           min_radius_required=CAR_MIN_RADIUS_M * SCALE,
-                          modo=modo)
+                          modo=modo, fechado=fechado)
     logger.info("Traçado '%s': raio minimo %.2f m (carro faz %.2f) | %d pontos",
-                modo, min_radius_m([(x, y) for x, y, _ in caminho]),
+                modo, min_radius_m([(x, y) for x, y, _ in caminho], fechado=fechado),
                 CAR_MIN_RADIUS_M * SCALE, len(caminho))
     return caminho
 
@@ -109,6 +110,22 @@ def _destravar(vehicle, trajeto):
     except AttributeError:
         pass
     return True
+
+
+def _volta_ao_inicio(world, vehicle, centerline, z):
+    """Recoloca o ego parado no comeco de uma pista com fim, para o proximo episodio."""
+    x0, y0, yaw0 = centerline[0]
+    vehicle.set_transform(carla.Transform(carla.Location(x0, y0, z),
+                                          carla.Rotation(yaw=math.degrees(yaw0))))
+    try:
+        vehicle.set_target_velocity(carla.Vector3D(0.0, 0.0, 0.0))
+        vehicle.set_target_angular_velocity(carla.Vector3D(0.0, 0.0, 0.0))
+    except AttributeError:
+        pass
+    vehicle.apply_control(carla.VehicleControl(hand_brake=True))
+    for _ in range(20):          # assenta antes de dirigir (ver eval_closedloop)
+        world.tick()
+    vehicle.apply_control(carla.VehicleControl(hand_brake=False))
 
 
 def _empurrao(vehicle, centerline, half_width, veh_width, rng, max_yaw, max_lat):
@@ -171,7 +188,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                   launch=True, quality="Low", recovery=False, recovery_every=5.0,
                   recovery_lat=0.7, recovery_yaw=6.0, recovery_min_speed=1.0, seed=0,
                   tracado="estadio", margem=0.0, recovery_amp=0.2,
-                  empurrar=True):
+                  empurrar=True, fim_m=4.5, pistas_teste=None):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -186,6 +203,9 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         "expert": "pure_pursuit",
         "map": wc.get("map_name"),
         "pistas": pistas,
+        # Pistas SEPARADAS para avaliar generalizacao: o modelo nunca as ve.
+        "pistas_teste": list(pistas_teste or []),
+        "fim_m": fim_m,
         "escala": track_cfg0.get("escala"),
         "camera": actor_cfg.get("camera", {}),
         "lidar_sectors": {"n_sectors": LIDAR_N_SECTORS, "max_range_m": LIDAR_MAX_RANGE_M},
@@ -247,11 +267,15 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                 build_track(world, track_cfg, pista_actors)
                 centerline = track_centerline(track_cfg)
                 lim_fora = track_width(track_cfg)   # desvio > largura util = fora da pista
+                # Pista com FIM (2026-10-09): cada episodio vai do comeco ate
+                # `fim_m` antes da parede do fim, e o ego volta ao comeco.
+                fechado = pista_fechada(pista, fator)
                 # O expert segue o TRACADO, nao o eixo. O eixo da curva pede raio
                 # 3,18 m e o carro faz 7,50 (0,625 medidos x12): seguir o eixo
                 # sempre foi impossivel, e e disso que vinha o subesterco. O eixo
                 # continua servindo para medir desvio -- ele e o meio da faixa.
-                trajeto = _trajeto_do_expert(tracado, centerline, track_cfg, margem)
+                trajeto = _trajeto_do_expert(tracado, centerline, track_cfg, margem,
+                                             fechado=fechado)
 
                 # Nasce no EIXO, nao no traçado: o traçado encosta no limite do
                 # corredor e o CARLA recusa o spawn por colisao com a parede. O
@@ -280,7 +304,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                     lookahead=float(prof.get("lookahead", 4.0)),
                     target_speed=float(prof.get("target_speed", 3.0)),
                     k_throttle=float(prof.get("k_throttle", 0.5)),
-                    max_steer_deg=max_steer)
+                    max_steer_deg=max_steer, fechado=fechado)
                 # O carro nasce no eixo, que pode estar longe do ponto 0 do
                 # traçado. O `_nearest_ahead` so olha 80 pontos a frente do
                 # ultimo indice, entao sem isto ele mira do outro lado da pista
@@ -290,9 +314,14 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                              + (trajeto[i][1] - y0) ** 2)
 
                 for _ep in range(episodes_por_pista):
+                    if not fechado and _ep > 0:
+                        _volta_ao_inicio(world, ego, centerline, z_spawn)
+                        pp.idx = 0
+                        travado = StuckDetector(v_min=0.3, steps=int(2.0 / fixed))
                     writer = EpisodeWriter(_episode_dir(out_dir, global_ep))
                     global_ep += 1
                     kept = dropped = recovered = 0
+                    chegou = False
                     sched.reset()   # o `step` recomeca em 0: o relogio tem que recomecar junto
                     try:
                         for step in range(steps_per_ep):
@@ -304,7 +333,13 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                                 _destravar(ego, trajeto)
                                 n_destravadas += 1
                             moving = v_agora >= recovery_min_speed
-                            if empurrar and sched.should_teleport(step, moving):
+                            # Perto das pontas de uma pista com fim as normais do
+                            # eixo nao valem (falta vizinho de um lado), e um
+                            # empurrao perto do fim joga o carro na parede.
+                            longe_das_pontas = fechado or (pp.idx > 8
+                                                           and pp.restante() > 3 * fim_m)
+                            if (empurrar and longe_das_pontas
+                                    and sched.should_teleport(step, moving)):
                                 _empurrao(ego, centerline,
                                           track_width(track_cfg) / 2.0,
                                           CAR_WIDTH_M * SCALE, rng, recovery_yaw,
@@ -347,16 +382,21 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                                 recovered += 1 if recovering else 0
                             else:
                                 dropped += 1
+                            if not fechado and pp.restante() <= fim_m:
+                                chegou = True
+                                break
                     finally:
                         writer.close()
-                    logger.info("  %s ep%d: kept %d (%d recovery), dropped %d%s",
+                    logger.info("  %s ep%d: kept %d (%d recovery), dropped %d%s%s",
                                 pista, global_ep - 1, kept, recovered, dropped,
+                                "" if fechado else ("  [chegou ao fim]" if chegou
+                                                    else "  [NAO chegou ao fim]"),
                                 "".join(
                                     ([] if not n_destravadas
                                      else ["  [%d destravadas]" % n_destravadas])
                                     + ([] if not n_colisoes
                                        else ["  [%d toques]" % n_colisoes])))
-                    if kept < 0.5 * steps_per_ep:
+                    if fechado and kept < 0.5 * steps_per_ep:
                         logger.warning(
                             "  ep%d aproveitou so %d de %d quadros -- o carro passou "
                             "a maior parte do tempo parado. Conferir antes de treinar.",
@@ -380,7 +420,19 @@ def main():
     p.add_argument("--settings", default="settings/pistaTCC.json")
     p.add_argument("--out", default="D:/tcc_data/dataset_track_v1")
     p.add_argument("--pistas", default="pista1,pista2,pista3",
-                   help="Lista de presets separados por virgula")
+                   help="Presets separados por virgula. Pistas da grade: "
+                        "grade:SDSES (codigo), ou os grupos grade:treino, "
+                        "grade:teste, grade:fechadas, grade:todas "
+                        "(ver ai/pistas_grade.py)")
+    p.add_argument("--frac-teste", type=float, default=0.15,
+                   help="fracao das pistas abertas da grade separadas para teste")
+    p.add_argument("--semente-split", type=int, default=0)
+    p.add_argument("--curva-final", action="store_true",
+                   help="inclui as pistas que terminam numa curva contra a parede")
+    p.add_argument("--fim-m", type=float, default=4.5, metavar="M",
+                   help="pista com fim: o episodio acaba a M metros (sim) do fim do "
+                        "traçado; 4,5 m = ~37 cm no carro, onde a regra do beco "
+                        "ja parou o carro real")
     p.add_argument("--episodes-por-pista", type=int, default=4)
     p.add_argument("--seconds", type=float, default=60.0)
     p.add_argument("--no-launch", action="store_true")
@@ -411,14 +463,18 @@ def main():
         print_report(dataset_report(a.report))
         return
 
-    pistas = [s.strip() for s in a.pistas.split(",") if s.strip()]
+    pistas, teste = expande_pistas(a.pistas, frac_teste=a.frac_teste,
+                                   semente=a.semente_split, curva_final=a.curva_final)
+    logger.info("%d pistas na coleta (%d abertas da grade ficaram para teste)",
+                len(pistas), len(teste))
     collect_track(
         settings_path=a.settings, out_dir=a.out, pistas=pistas,
         episodes_por_pista=a.episodes_por_pista, seconds=a.seconds,
         launch=not a.no_launch, quality=a.quality, recovery=a.recovery,
         recovery_every=a.recovery_every, recovery_lat=a.recovery_lat,
         recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado, margem=a.margem,
-        recovery_amp=a.recovery_amp, empurrar=not a.sem_empurrao)
+        recovery_amp=a.recovery_amp, empurrar=not a.sem_empurrao,
+        fim_m=a.fim_m, pistas_teste=teste)
 
 
 if __name__ == "__main__":

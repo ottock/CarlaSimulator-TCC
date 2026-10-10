@@ -37,14 +37,17 @@ logger = logging.getLogger(__name__)
 
 class PurePursuit:
     def __init__(self, waypoints, wheelbase=2.8, lookahead=4.0,
-                 target_speed=5.0, k_throttle=0.5, max_steer_deg=70.0):
+                 target_speed=5.0, k_throttle=0.5, max_steer_deg=70.0, fechado=True):
         """Args:
             waypoints    : lista de (x, y, yaw_rad) no frame do CARLA (linha de centro).
             wheelbase    : distancia entre eixos do carro (m).
             lookahead    : distancia Ld do ponto de mira a frente (m).
             target_speed : velocidade alvo (m/s).
             k_throttle   : ganho do P de velocidade.
-            max_steer_deg: esterco fisico maximo do carro (p/ normalizar delta em [-1,1])."""
+            max_steer_deg: esterco fisico maximo do carro (p/ normalizar delta em [-1,1]).
+            fechado      : laco (padrao). Em pista COM FIM (2026-10-09) o indice nao
+                           da a volta: perto do fim a mira para no ultimo ponto, em
+                           vez de apontar de volta para o comeco da pista."""
         self.wps = waypoints
         self.n = len(waypoints)
         self.L = wheelbase
@@ -54,6 +57,7 @@ class PurePursuit:
         self.max_steer = math.radians(max_steer_deg)
         self.idx = 0            # ultimo waypoint mais proximo (memoria de progresso)
         self.laps = 0           # voltas completas (detecta o "wrap" do indice)
+        self.fechado = bool(fechado)
 
     def _nearest_ahead(self, x, y, janela=80):
         """Acha o waypoint mais proximo, buscando SO PARA FRENTE a partir do ultimo
@@ -61,7 +65,7 @@ class PurePursuit:
         pista se aproxima de si mesma, e e' O(janela) em vez de O(n)."""
         melhor, melhor_d = self.idx, 1e18
         for off in range(janela):
-            i = (self.idx + off) % self.n
+            i = (self.idx + off) % self.n if self.fechado else min(self.idx + off, self.n - 1)
             dx = self.wps[i][0] - x
             dy = self.wps[i][1] - y
             d = dx * dx + dy * dy
@@ -80,6 +84,8 @@ class PurePursuit:
         j = i
         dist = 0.0
         while dist < self.Ld:
+            if not self.fechado and j >= self.n - 1:
+                break           # pista com fim: a mira para no ultimo ponto
             nj = (j + 1) % self.n
             dist += math.hypot(self.wps[nj][0] - self.wps[j][0],
                                self.wps[nj][1] - self.wps[j][1])
@@ -87,6 +93,14 @@ class PurePursuit:
             if j == i:          # deu a volta inteira (pista curtissima) -> para
                 break
         return self.wps[j]
+
+    def restante(self):
+        """Metros de caminho do ultimo ponto mais proximo ate o fim (pista com fim)."""
+        if self.fechado:
+            return float("inf")
+        return sum(math.hypot(self.wps[j + 1][0] - self.wps[j][0],
+                              self.wps[j + 1][1] - self.wps[j][1])
+                   for j in range(self.idx, self.n - 1))
 
     def control(self, x, y, yaw, speed):
         """Calcula (steer, throttle, brake) em [-1,1]/[0,1]/[0,1] para o estado atual.

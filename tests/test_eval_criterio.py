@@ -52,3 +52,25 @@ def test_a_short_run_fails_even_at_speed():
 
 def test_the_reason_is_empty_when_it_passes():
     assert motivo(_s()) == ""
+
+
+# Pista com fim (2026-10-09)
+
+def test_an_open_track_is_clean_when_the_car_stops_at_the_end():
+    from ai.eval_criterio import corrida_limpa
+    curta = {"collisions": 0, "offlane": 0, "mean_speed": 1.5, "distance_m": 12.0,
+             "chegou_ao_fim": True, "restante_m": 5.0}
+    assert corrida_limpa(curta)                      # 12 m e normal numa pista curta
+
+
+def test_stopping_before_the_end_fails_an_open_track():
+    from ai.eval_criterio import motivo
+    m = motivo({"collisions": 0, "offlane": 0, "mean_speed": 1.5, "distance_m": 30.0,
+                "chegou_ao_fim": False, "restante_m": 20.0})
+    assert "nao chegou ao fim" in m
+
+
+def test_a_crash_still_fails_an_open_track():
+    from ai.eval_criterio import motivo
+    assert motivo({"collisions": 1, "offlane": 0, "mean_speed": 1.5,
+                   "chegou_ao_fim": True}).startswith("colisoes")

@@ -127,7 +127,10 @@ def _montar(sequencia, conectores, fechar_gap=False, fator=1.0):
     # Distribui o residuo de fechamento (se pedido e se for pequeno): a peca i
     # desliza -erro*(i/N); cada emenda fica com erro/N (~mm). Pecas e waypoints
     # sao corrigidos juntos para continuarem casando.
-    if fechar_gap and 1e-9 < math.hypot(px, py) < 0.15 * fator:
+    # So quando o RUMO tambem fecha: uma pista aberta cujo fim cai perto do
+    # inicio nao e laco, e espalhar o "residuo" entortaria a pista inteira.
+    fecha_rumo = abs(math.atan2(math.sin(h), math.cos(h))) < math.radians(5.0)
+    if fechar_gap and fecha_rumo and 1e-9 < math.hypot(px, py) < 0.15 * fator:
         ex, ey, n = px, py, len(sequencia)
         poses = [(nome, x - ex * i / n, y - ey * i / n, a)
                  for i, (nome, x, y, a) in enumerate(poses)]
@@ -154,6 +157,8 @@ def _preset(nome: str) -> list[str]:
     # Preenchidas apos conferir a sequencia fechada de cada uma com o grupo.
     if nome == "oval_tcc":
         return _OVAL_TCC
+    if nome.startswith("grade:"):
+        return pecas_do_codigo(nome[len("grade:"):])
     if nome in ("pista1", "pista2", "pista3"):
         seq = _PISTAS_ESTANDE.get(nome)
         if not seq:
@@ -161,6 +166,77 @@ def _preset(nome: str) -> list[str]:
                 f"'{nome}': sequencia ainda nao transcrita (falta a leitura fechada do esquema)")
         return seq
     raise ValueError(f"preset de pista desconhecido: '{nome}'")
+
+
+# Pistas da GRADE (2026-10-09): "grade:<codigo>", com S = reta, E/D = curva a
+# esquerda/direita (catalogo em ai/pistas_grade.py). Nao existe prop de 50 cm:
+# a reta real vira branca + cinza = 53 cm, a mesma faixa das curvas, entao a casa
+# da grade do simulador e quadrada (53 x 53).
+def pecas_do_codigo(codigo: str) -> list[str]:
+    mapa = {"S": ["tcc_reta_branca", "tcc_reta_cinza"],
+            "E": ["tcc_curva90"], "D": ["tcc_curva90_r"]}
+    out = []
+    for x in codigo:
+        if x not in mapa:
+            raise ValueError(f"peca desconhecida {x!r} no codigo {codigo!r} (use S, E, D)")
+        out += mapa[x]
+    if not out:
+        raise ValueError("codigo de pista vazio")
+    return out
+
+
+def pista_fechada(sequencia, fator: float = 1.0) -> bool:
+    """A sequencia volta ao inicio, no mesmo rumo? (laco, sem ponta)."""
+    if isinstance(sequencia, str):
+        sequencia = _preset(sequencia)
+    _p, (px, py, h), _w = _montar(sequencia, _conectores(fator), fechar_gap=False, fator=fator)
+    return math.hypot(px, py) < 0.15 * fator and abs(_norm_ang(h)) < math.radians(5.0)
+
+
+def parede_do_fim(sequencia, fator: float = 1.0, espessura: float = 0.0) -> list:
+    """Pecas que fecham o FIM de uma pista aberta com uma parede branca.
+
+    Na pista fisica o fim e fechado com mais uma parede branca, igual as
+    laterais. Aqui ela sai das proprias retas: branca + cinza GIRADAS 90 graus,
+    lado a lado, cobrem exatamente a largura da faixa, e a parede de perto de cada
+    uma fica atravessada no fim -- mesma textura e altura das paredes laterais. O
+    resto delas (piso e a outra parede) fica alem do fim, fora da pista.
+
+    ``espessura`` e a da parede (medida no prop em ``build_track``): a face de
+    perto cai exatamente no fim da faixa.
+
+    Devolve ``[]`` se a pista e um laco, ou se a casa depois do fim ja e parte do
+    percurso -- ai a parede lateral daquela peca ja fecha o fim, e as pecas
+    giradas cairiam em cima da pista.
+
+    Returns:
+        Lista de ``(nome, x, y, alpha)`` no mesmo frame de ``_montar``.
+    """
+    if isinstance(sequencia, str):
+        sequencia = _preset(sequencia)
+    if pista_fechada(sequencia, fator):
+        return []
+    hw = LARGURA_PISTA * fator / 2.0
+    _p, (px, py, h), _w = _montar(sequencia, _conectores(fator), fechar_gap=False, fator=fator)
+    fx, fy = math.cos(h), math.sin(h)          # frente, no fim
+    ex, ey = -math.sin(h), math.cos(h)         # esquerda
+    # Centro da casa depois do fim: se o eixo da pista passa ali, ela esta ocupada.
+    cx, cy = px + hw * fx, py + hw * fy
+    eixo = gerar_waypoints(sequencia, fator, espacamento=hw / 8.0)
+    if any(math.hypot(w["x"] - cx, w["y"] - cy) < 0.8 * hw for w in eixo):
+        return []
+    # x local da reta -> esquerda; y local -> para tras. A parede de y local
+    # +(hw + esp/2) e a de perto; com o centro a (hw + esp) do fim, a face dela
+    # fica no fim.
+    alpha = h + math.pi / 2.0
+    d = hw + float(espessura)
+    lb = COMPRIMENTO_RETA_BRANCA * fator
+    lc = COMPRIMENTO_RETA_CINZA * fator
+    # Branca de um lado, cinza do outro: juntas somam a largura da faixa (53 cm).
+    return [("tcc_reta_branca", px + d * fx + (hw - lb / 2.0) * ex,
+             py + d * fy + (hw - lb / 2.0) * ey, alpha),
+            ("tcc_reta_cinza", px + d * fx - (hw - lc / 2.0) * ex,
+             py + d * fy - (hw - lc / 2.0) * ey, alpha)]
 
 
 # Sequencias das pistas do estande (SchemaPista*.png). Vao sendo preenchidas conforme
@@ -423,6 +499,30 @@ def build_track(world: carla.World, track_config: dict, actor_list: list) -> lis
         ys.append(loc.y)
 
     logger.info(f"Track: {len(props)}/{len(poses)} pecas colocadas")
+
+    # Fim de pista aberta: parede branca atravessada (ver `parede_do_fim`). A
+    # espessura da parede sai do proprio prop: a caixa da reta tem a faixa util
+    # mais as duas paredes.
+    if not pista_fechada(sequencia, fator):
+        esp = 0.0
+        for a in props:
+            if a.type_id.endswith("tcc_reta_branca" + sufixo):
+                esp = max(0.0, float(a.bounding_box.extent.y) - LARGURA_PISTA * fator / 2.0)
+                break
+        fim = parede_do_fim(sequencia, fator, esp)
+        for (nome, tx, ty, alpha) in fim:
+            bp = bl.find("static.prop." + _prop_base(nome) + sufixo)
+            ator = world.try_spawn_actor(bp, carla.Transform(carla.Location(0.0, 0.0, 100.0)))
+            if ator is None:
+                logger.warning("Track: falhou spawn da parede do fim (%s)" % (nome + sufixo))
+                continue
+            ator.set_transform(carla.Transform(carla.Location(x=tx, y=flip_y * ty, z=z),
+                                               carla.Rotation(yaw=flip_yaw * math.degrees(alpha))))
+            actor_list.append(ator)
+            props.append(ator)
+        logger.info("Track: pista aberta -- fim %s (parede %.2f m de espessura)"
+                    % ("fechado com %d pecas giradas" % len(fim) if fim
+                       else "ja fechado pela parede de uma peca do percurso", esp))
 
     # --- Obstaculos em posicoes ALEATORIAS sobre a pista ---
     # Sorteia um ponto da linha da pista (waypoint) + um deslocamento lateral

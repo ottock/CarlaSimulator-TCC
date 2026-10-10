@@ -76,10 +76,19 @@ def menger_curvature(p0, p1, p2):
 
 
 def path_curvatures(pts, fechado=True):
-    """Curvatura em cada ponto, em 1/m (vetorizado)."""
+    """Curvatura em cada ponto, em 1/m (vetorizado).
+
+    Caminho aberto: as pontas ficam com zero. Antes elas eram calculadas com o
+    vizinho do OUTRO lado da pista (``np.roll``), e o raio minimo de uma pista
+    com fim saia de um triangulo que nao existe.
+    """
     p = _xy(pts)
     if fechado:
         p = _sem_ponto_repetido(p)
+    elif len(p) >= 3:
+        k = path_curvatures(p, fechado=True)
+        k[0] = k[-1] = 0.0
+        return k
     p0, p2 = np.roll(p, 1, axis=0), np.roll(p, -1, axis=0)
     a = np.hypot(*(p - p0).T)
     b = np.hypot(*(p2 - p).T)
@@ -274,15 +283,19 @@ def fits(path, centerline, half_width, vehicle_width, vehicle_length=0.0, tol=1e
     return bool(distance_to_centerline(path, centerline).max() <= lim + tol)
 
 
-MODOS = ("estadio", "eixo")
+MODOS = ("estadio", "eixo", "geral")
 
 
 def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
-                margin=0.0, min_radius_required=None, modo="estadio", n_points=240):
+                margin=0.0, min_radius_required=None, modo="estadio", n_points=240,
+                fechado=True):
     """Caminho que o expert deve seguir, com a conferencia que faltava.
 
     ``"eixo"`` devolve a linha de centro -- o comportamento antigo, mantido para
-    as pistas do estande, que nao sao ovais. ``"estadio"`` devolve o traçado.
+    as pistas do estande, que nao sao ovais. ``"estadio"`` devolve o traçado do
+    oval. ``"geral"`` (2026-10-09) e o minimax de curvatura de
+    ``ai.tracado_geral``: reencontra o estadio no oval e serve para qualquer
+    pista da grade, inclusive as com fim (``fechado=False``).
 
     ``min_radius_required`` (o raio minimo do carro REAL, na escala do
     simulador) faz a funcao RECUSAR um caminho que o carro nao executa. E a
@@ -296,9 +309,20 @@ def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
     if modo not in MODOS:
         raise ValueError("modo de traçado desconhecido: %r (use %s)" % (modo, list(MODOS)))
 
+    if modo != "geral" and not fechado:
+        raise ValueError("traçado '%s' so existe para laco; pista com fim usa 'geral'" % modo)
+
     if modo == "eixo":
         caminho = [(float(p[0]), float(p[1]),
                     float(p[2]) if len(p) > 2 else 0.0) for p in centerline]
+    elif modo == "geral":
+        from ai.tracado_geral import tracado_geral     # scipy: so quando pedido
+        raio_ref = (float(min_radius_required) if min_radius_required is not None
+                    else 2.0 * float(half_width))
+        caminho = [tuple(map(float, linha))
+                   for linha in tracado_geral(centerline, fechado, half_width,
+                                              vehicle_width, vehicle_length,
+                                              margin, raio_ref=raio_ref)]
     else:
         caminho = [tuple(map(float, linha))
                    for linha in stadium_path(centerline, half_width, vehicle_width,
@@ -306,7 +330,7 @@ def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
                                              n_points=n_points)]
 
     if min_radius_required is not None:
-        r = min_radius_m([(x, y) for x, y, _ in caminho])
+        r = min_radius_m([(x, y) for x, y, _ in caminho], fechado=fechado)
         if r < float(min_radius_required) - 1e-9:
             raise ValueError(
                 "traçado '%s' exige raio de %.2f m e o carro so faz %.2f m: coletar "

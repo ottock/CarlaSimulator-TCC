@@ -28,14 +28,16 @@ import time
 
 import carla
 
+from ai.car.control_map import dead_end, front_blocked
 from ai.eval_criterio import corrida_limpa, motivo
 from ai.metrics import RouteMetrics
 from ai.model_policy import DrivingPolicy
+from ai.pistas_grade import expande_pistas
 from ai.track_ref import track_centerline, track_width, deviation_from_centerline
 from ai.eval_closedloop import (
     _launch_server, _terminate_server, _attach_collision_sensor, read_observation, _speed_ms,
 )
-from core.carlaClient.track_builder import build_track
+from core.carlaClient.track_builder import build_track, pista_fechada
 from core.carlaClient.world_manager import (
     connect_to_carla, simulation_context, spawn_actor_vehicle,
     setup_spectator_follow_vehicle, update_spectator_position,
@@ -48,7 +50,8 @@ logger = logging.getLogger("eval_track")
 
 def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0,
                    ablate_lidar=False, realtime=False, follow=True, launch=True,
-                   quality="Low", throttle_fixo=0.30):
+                   quality="Low", throttle_fixo=0.30, beco=0.5, parada=0.06,
+                   fim_max_m=8.0):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -79,6 +82,18 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                 build_track(world, track_cfg, pista_actors)
                 centerline = track_centerline(track_cfg)
                 half_w = track_width(track_cfg) / 2.0
+                # Pista com FIM (2026-10-09): o carro tem de parar sozinho, como no
+                # carro real -- velocidade constante, e as MESMAS duas regras do
+                # runtime (control_map), sobre o MESMO vetor que o modelo recebe:
+                # parada de emergencia no cone frontal e o beco, que trava. Os
+                # limiares sao normalizados pelo max_range, entao valem igual no
+                # sim (12 m) e no carro (1 m).
+                fechado = pista_fechada(pista, fator)
+                s_eixo = [0.0]
+                for i in range(1, len(centerline)):
+                    s_eixo.append(s_eixo[-1] + math.hypot(
+                        centerline[i][0] - centerline[i - 1][0],
+                        centerline[i][1] - centerline[i - 1][1]))
 
                 x0, y0, yaw0 = centerline[0]
                 spawn_tf = carla.Transform(carla.Location(x0, y0, z_spawn),
@@ -105,6 +120,7 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                 percorrido, ant = 0.0, None
                 idx = 0
                 first_col = None
+                fim = False
                 for step in range(steps):
                     t0 = time.perf_counter()
                     obs = read_observation(ego, sensors)
@@ -118,6 +134,12 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                         # aprendeu so o acelerador de cruzeiro (0,125) e nem
                         # sai do lugar.
                         throttle, brake = float(throttle_fixo), 0.0
+                    if not fechado:
+                        vec = policy._lidar_vector(obs)
+                        if beco > 0 and not fim and dead_end(vec, beco):
+                            fim = True
+                        if fim or front_blocked(vec, parada):
+                            throttle, brake = 0.0, 1.0
                     ego.apply_control(carla.VehicleControl(steer=steer, throttle=throttle, brake=brake))
                     world.tick()
                     if spec:
@@ -132,6 +154,8 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                     metrics.add(dev, _speed_ms(ego), departed, steer=steer)
                     if first_col is None and len(collisions) > 0:
                         first_col = step
+                    if fim and _speed_ms(ego) < 0.05:
+                        break                    # parou no fim: corrida encerrada
                     if realtime:
                         rem = fixed - (time.perf_counter() - t0)
                         if rem > 0:
@@ -142,11 +166,18 @@ def run_track_eval(settings_path, model_ckpt, pistas, seconds=120.0, obstacles=0
                 s["collisions"] = len(collisions)
                 s["first_col_s"] = first_col * fixed if first_col is not None else -1.0
                 s["distance_m"] = percorrido
+                if not fechado:
+                    # "Chegou" = parou pela regra do beco ja na ultima peca, nao
+                    # no meio da pista por um falso positivo.
+                    s["restante_m"] = s_eixo[-1] - s_eixo[idx]
+                    s["chegou_ao_fim"] = bool(fim and s["restante_m"] <= fim_max_m)
                 summaries.append(s)
                 logger.info("PISTA %s: mean_dev=%.2fm p95=%.2fm max=%.2fm offlane=%d collisions=%d "
-                            "mean_speed=%.1fm/s%s", pista, s["mean_dev"], s["p95_dev"], s["max_dev"],
+                            "mean_speed=%.1fm/s%s%s", pista, s["mean_dev"], s["p95_dev"], s["max_dev"],
                             s["offlane"], s["collisions"], s["mean_speed"],
-                            ("  <-- 1a COLISAO @ %.1fs" % s["first_col_s"]) if s["collisions"] else "")
+                            ("  <-- 1a COLISAO @ %.1fs" % s["first_col_s"]) if s["collisions"] else "",
+                            "" if fechado else ("  | parou a %.1f m do fim%s" % (
+                                s["restante_m"], "" if s["chegou_ao_fim"] else " -- NAO CHEGOU")))
                 if not corrida_limpa(s):
                     logger.warning("PISTA %s REPROVOU: %s (andou %.1f m)",
                                    pista, motivo(s), s["distance_m"])
@@ -177,7 +208,16 @@ def main():
     p = argparse.ArgumentParser(description="Loop fechado na pista custom (Fase 4)")
     p.add_argument("--settings", default="settings/pistaTCC.json")
     p.add_argument("--model", required=True)
-    p.add_argument("--pistas", default="pista1,pista2,pista3")
+    p.add_argument("--pistas", default="pista1,pista2,pista3",
+                   help="presets, codigos grade:SDSES ou grupos grade:teste etc. "
+                        "(ver ai/pistas_grade.py). grade:teste so bate com a coleta "
+                        "se --frac-teste/--semente-split forem os mesmos.")
+    p.add_argument("--frac-teste", type=float, default=0.15)
+    p.add_argument("--semente-split", type=int, default=0)
+    p.add_argument("--curva-final", action="store_true")
+    p.add_argument("--beco", type=float, default=0.5,
+                   help="limiar normalizado da regra do beco nas pistas com fim "
+                        "(0.5 = 50 cm no carro). 0 desliga.")
     p.add_argument("--seconds", type=float, default=120.0)
     p.add_argument("--obstacles", type=int, default=0, help="Espalha N obstaculos na pista")
     p.add_argument("--ablate-lidar", action="store_true", help="Neutraliza o LiDAR (ablacao)")
@@ -190,12 +230,13 @@ def main():
                         "Passe -1 para usar a cabeca de throttle do modelo.")
     a = p.parse_args()
 
-    pistas = [s.strip() for s in a.pistas.split(",") if s.strip()]
+    pistas, _ = expande_pistas(a.pistas, frac_teste=a.frac_teste,
+                               semente=a.semente_split, curva_final=a.curva_final)
     run_track_eval(
         settings_path=a.settings, model_ckpt=a.model, pistas=pistas, seconds=a.seconds,
         obstacles=a.obstacles, ablate_lidar=a.ablate_lidar, realtime=a.realtime,
         follow=not a.no_follow, launch=not a.no_launch, quality=a.quality,
-        throttle_fixo=(None if a.throttle_fixo < 0 else a.throttle_fixo))
+        throttle_fixo=(None if a.throttle_fixo < 0 else a.throttle_fixo), beco=a.beco)
 
 
 if __name__ == "__main__":
