@@ -84,18 +84,50 @@ Queremos começar pelo problema, com adereços físicos:
   freia sem motivo, a onda se propaga para trás). Perguntamos: "quantos destes carros precisam
   ser autônomos para isso não acontecer mais?". Revelamos: de 5 a 10%.
 
-**Afirmações que queremos usar — todas [A CONFIRMAR], preciso da fonte antes de pôr num cartaz:**
+**Afirmações que queremos usar — todas [A CONFIRMAR], preciso da fonte conferida antes de pôr
+num cartaz:**
 
-| Afirmação | O que eu sei sobre a origem |
+| Afirmação | De onde achamos que vem |
 |---|---|
-| Acidentes de trânsito são a maior causa de morte entre jovens | Parece vir da OMS, que fala da faixa de 5 a 29 anos **no mundo**. Conferir a faixa etária e o recorte: no Brasil a principal causa entre jovens pode ser outra, e aí o jogo do ranking precisa dizer "no mundo". |
-| Com apenas 5% dos carros autônomos dá para evitar engarrafamentos fantasma | Parece vir de um experimento de campo de 2018 (Stern e outros), com 1 carro autônomo entre cerca de 20 numa pista circular. Conferir e ajustar a frase: é um experimento controlado, não uma previsão para o trânsito de uma cidade. |
-| Engarrafamentos fantasma são 20% do trânsito | Não sei a fonte. |
-| O fim deles reduz o consumo de combustível em 40% | Parece vir do mesmo experimento de 2018. Conferir o que exatamente foi medido. |
-| A velocidade média do trânsito subiria de 6% a 12% | Não sei a fonte. |
+| Acidentes de trânsito são a maior causa de morte entre jovens | **Sem fonte ainda.** Parece ser um dado da OMS para a faixa de 5 a 29 anos **no mundo**. Conferir a faixa etária e o recorte: no Brasil a principal causa entre jovens pode ser outra, e aí o jogo do ranking precisa dizer "no mundo". |
+| Com 5% a 10% dos carros autônomos dá para evitar engarrafamentos fantasma | Estudos 1 e 2 abaixo. O estudo 1 é um experimento controlado numa pista circular, não uma previsão para o trânsito de uma cidade: a frase precisa respeitar isso. |
+| Engarrafamentos fantasma são 20% do trânsito | **Sem fonte.** Nenhum dos estudos abaixo diz isso, até onde sei. |
+| O fim deles reduz o consumo de combustível em 40% | Estudo 1. Conferir o que exatamente foi medido (consumo de quais carros, em que condição). |
+| A velocidade média do trânsito subiria de 6% a 12% | Estudo 2, segundo o resumo que temos. Conferir. |
 
-Me ajude a **conferir cada uma, apontar a fonte e propor uma frase honesta**. Se alguma não se
-sustentar, diga e proponha outra. As três últimas talvez nem caibam no tempo.
+**Estudos que encontramos.** Atenção: a lista abaixo veio de um **resumo que eu não conferi nos
+artigos originais**. Trate títulos, autores, periódicos e números como [A CONFIRMAR].
+
+1. **Stern e outros (2018), *Dissipation of stop-and-go waves via control of autonomous
+   vehicles: Field experiments*, Transportation Research Part C.** Experimento de campo: um
+   carro autônomo no meio de cerca de 20 carros com motoristas humanos, numa pista circular,
+   dissolve as ondas de anda-e-para sem comunicação entre veículos. O resumo diz: até 40% menos
+   combustível e até 15% mais vazão.
+2. ***Smoothing Traffic Flow via Control of Autonomous Vehicles*.** O resumo atribui a "J. Wang,
+   S. Zheng, C. Wu e colaboradores (MIT e UC Berkeley)", em IEEE Transactions on Control Systems
+   Technology / arXiv, 2018–2020, e diz que 5% a 10% de autônomos bastam para estabilizar o
+   tráfego em rodovias de várias faixas, com 6% a 12% a mais de velocidade média.
+   **Desconfio da atribuição:** pode haver mistura de dois trabalhos diferentes (um artigo com
+   esse título e outro grupo que estuda tráfego misto com aprendizado por reforço). Conferir
+   autores, periódico e se os números estão mesmo nesse artigo.
+3. **Sugiyama e outros (2008), *Traffic jams without bottlenecks — experimental evidence for
+   the physical mechanism of the formation of a jam*, New Journal of Physics.** O experimento
+   que mostrou o engarrafamento fantasma: 22 carros com motoristas humanos numa pista circular
+   formam ondas de parada sozinhos, sem gargalo. É a base do nosso adereço com Hot Wheels.
+4. **"Pesquisas do Instituto Fraunhofer / Universidade Temple (2023–2026)"**, com o simulador
+   RODOS e Benjamin Seibold. O resumo diz que nem todo piloto automático ajuda: um controle de
+   cruzeiro adaptativo "agressivo", que anda colado no carro da frente, pode **piorar** o
+   engarrafamento; só ajuda o que suaviza a velocidade. **Não consegui confirmar que esse
+   estudo existe como descrito.** A ideia em si aparece em trabalhos do mesmo grupo sobre
+   controles de cruzeiro comerciais; achar a referência certa.
+
+O ponto do item 4 é importante para a nossa fala ser honesta: "carro autônomo" não resolve o
+trânsito por si só — depende de como ele é programado.
+
+Me ajude a **conferir cada afirmação na fonte original, corrigir o que estiver errado no resumo
+e propor uma frase honesta** para cada uma. Se não conseguir conferir, diga isso em vez de
+confirmar de memória. Se alguma não se sustentar, diga e proponha outra. As três últimas da
+tabela talvez nem caibam no tempo.
 
 ### 4.2 Teoria rápida **[PLANO]**
 
