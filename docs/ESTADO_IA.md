@@ -28,9 +28,36 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 
 ## 2. Estado atual (o que funciona)
 
-> ### 🏁 MVP: `driving_oval_v4` (decidido em 2026-10-09)
-> **Se nada mais funcionar, é este que roda na apresentação.** Testado no oval real: voltas
-> seguidas, funcionou muito bem. O MVP é o modelo **e** o código que o rodou — a tag
+> ### 🏆 Melhor versão: `driving_grade_v5d1` (teste no carro real, 2026-10-12)
+> **É a nossa melhor versão.** Relato do Rafael, com o v4 e o v5d1 testados no carro na mesma
+> sessão: o **v5d1 andou muito bem, sem nenhuma batida nem raspagem**; o **v4 ficou raspando e
+> batendo**. Código: tag **`melhor-v5d1`** (o branch `feat/ai-fase4-pista-custom`; a tag `mvp-v4`
+> não tem a parada de fim de pista). No carro:
+> ```bash
+> cd ~/CarlaSimulator-TCC && git fetch --tags && git checkout melhor-v5d1
+> cd models && /usr/src/tensorrt/bin/trtexec --onnx=driving_grade_v5d1.onnx --saveEngine=driving_grade_v5d1.engine --fp16 && cd ..
+> sed -i 's/^ESC_ARMADO = False/ESC_ARMADO = True/' hardware/jetson_runtime.py
+> python3 hardware/jetson_runtime.py --engine models/driving_grade_v5d1.engine --config models/driving_grade_v5d1.json --out runs/v5d1_$(date +%Y-%m-%d_%H%M%S) --cruise-us 1610 --beco-dist 0.5
+> ```
+> O que é: treinado em 88 formatos de pista da grade + o oval (`dataset_grade_v5`, LiDAR de volta
+> inteira, traçado geral com 3 cm de margem) e ajustado com uma rodada de DAgger
+> (`dagger_v5_r1`); ONNX com paridade 3,7e-07.
+> - **Melhoria conhecida, SEM prioridade agora:** às vezes ele passa **bem perto da parede
+>   INTERNA da curva**. Não bate nem raspa. Hipótese (não medida): ele foi treinado no gêmeo
+>   ANTES da calibração do esterço, onde o carro era ~25% menos ágil e o expert vivia no batente —
+>   os rótulos pedem mais esterço do que o carro real precisa, e ele fecha a curva um pouco demais.
+>   Caminho quando for a hora: mesma receita (grade + DAgger) recoletada no gêmeo calibrado, e
+>   medir nas corridas reais (LiDAR do lado de dentro da curva) antes e depois.
+> - **O gêmeo errou a ordem:** calibrado, ele dava os dois limpos em 21/21 pistas e o v4 como o
+>   mais centralizado. No carro foi o contrário. O simulador serve para descartar o que não
+>   funciona; **quem decide entre candidatos é a pista real**.
+> - Falta registrar deste teste: em que pista foi, e se a parada no fim (`FIM DA PISTA`) disparou.
+>
+> ### 🏁 MVP anterior: `driving_oval_v4` (decidido em 2026-10-09)
+> Foi o primeiro modelo a dar voltas seguidas no oval real. Em 2026-10-12, no teste lado a lado,
+> raspou e bateu onde o v5d1 andou limpo — **o v5d1 passou a ser a versão a usar**. Continua
+> disponível na tag `mvp-v4`; se ainda serve de plano B no oval depende de em que pista ele
+> raspou nesse teste (a confirmar). O MVP é o modelo **e** o código que o rodou — a tag
 > **`mvp-v4`** marca os dois. No dia:
 > ```bash
 > cd ~/CarlaSimulator-TCC && git fetch --tags && git checkout mvp-v4
@@ -100,13 +127,13 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 >   o modelo. Com o gêmeo calibrado, **o próprio v4 dirige todas as pistas da grade**, centralizado
 >   e com mais folga que os outros. O v6c segue a linha de corrida com precisão — e a linha passa a
 >   3 cm da parede por definição; dirigir centralizado se mostrou mais robusto.
-> - **Próximo passo: teste REAL do v4 numa pista que não é o oval**, com a parede branca no fim e a
->   parada do beco ligada (o código do carro precisa do branch atual, não da tag `mvp-v4`; desde ela
->   só entrou o `--beco-dist`, desligado por padrão):
+> - **Teste real feito em 2026-10-12: o v5d1 ganhou** (ver o topo desta seção). O comando do v4
+>   usado nele, para referência (o código do carro precisa do branch atual, não da tag `mvp-v4`;
+>   desde ela só entrou o `--beco-dist`, desligado por padrão):
 >   ```bash
 >   python3 hardware/jetson_runtime.py --engine models/driving_oval_v4.engine --config models/driving_oval_v4.json --out runs/grade_$(date +%Y-%m-%d_%H%M%S) --cruise-us 1610 --beco-dist 0.5
 >   ```
->   Segundo candidato: `models/driving_grade_v5d1.onnx` (paridade ONNX 3,7e-07).
+>   O então "segundo candidato", `models/driving_grade_v5d1.onnx`, foi o que funcionou.
 > - Coleta do v5: `--pistas "oval_tcc*16,grade:treino" --episodes-por-pista 2 --seconds 60
 >   --tracado geral --margem 0.36 --recovery --seed 1` → `D:/tcc_data/dataset_grade_v5`.
 
