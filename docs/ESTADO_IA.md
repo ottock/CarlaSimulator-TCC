@@ -42,16 +42,25 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 > O que é: treinado em 88 formatos de pista da grade + o oval (`dataset_grade_v5`, LiDAR de volta
 > inteira, traçado geral com 3 cm de margem) e ajustado com uma rodada de DAgger
 > (`dagger_v5_r1`); ONNX com paridade 3,7e-07.
+> - **Pista do teste** (foto do Rafael): a montagem `SDSESESES` / `SDSDSDSES` (a mesma pista nos dois
+>   sentidos) — 9 peças, 4 curvas: um "S" e três curvas seguidas para o mesmo lado, cada uma com uma
+>   reta no meio. É o formato **mais apertado do catálogo** (pico de 84% do esterço na linha). O fim
+>   era fechado com parede branca, e **a parada do fim (`--beco-dist 0.5`) disparou corretamente**.
+>   Essa montagem estava no TREINO do v5d1 (nos dois sentidos); o v4 nunca a viu. Uma pista das 5
+>   montagens separadas para teste (`grade:teste`) ainda não foi rodada no carro real.
 > - **Melhoria conhecida, SEM prioridade agora:** às vezes ele passa **bem perto da parede
->   INTERNA da curva**. Não bate nem raspa. Hipótese (não medida): ele foi treinado no gêmeo
->   ANTES da calibração do esterço, onde o carro era ~25% menos ágil e o expert vivia no batente —
->   os rótulos pedem mais esterço do que o carro real precisa, e ele fecha a curva um pouco demais.
->   Caminho quando for a hora: mesma receita (grade + DAgger) recoletada no gêmeo calibrado, e
->   medir nas corridas reais (LiDAR do lado de dentro da curva) antes e depois.
+>   INTERNA da curva**. Não bate nem raspa. Em boa parte é o **desenho da linha de corrida**: ela
+>   entra por fora, corta por dentro e sai por fora. Medido nessa pista: na linha, o flanco de
+>   dentro passa a **5,3–6,3 cm do canto interno** em três das quatro curvas (`--margem 0.36` =
+>   3 cm além da varredura da carroceria). Com o erro do carro real, sobra menos. A alavanca,
+>   quando for a hora: **mais margem do lado de DENTRO** (margem assimétrica no `tracado_geral`),
+>   ao custo de um pouco de reserva de esterço; recoletar no gêmeo calibrado e medir nas corridas
+>   reais (LiDAR do lado de dentro da curva) antes e depois. Hipótese secundária, não medida: o
+>   v5d1 treinou antes da calibração do esterço do gêmeo e pode fechar a curva um pouco demais.
 > - **O gêmeo errou a ordem:** calibrado, ele dava os dois limpos em 21/21 pistas e o v4 como o
 >   mais centralizado. No carro foi o contrário. O simulador serve para descartar o que não
 >   funciona; **quem decide entre candidatos é a pista real**.
-> - Falta registrar deste teste: em que pista foi, e se a parada no fim (`FIM DA PISTA`) disparou.
+> - Falta registrar deste teste: de que ponta o carro largou, e as pastas `runs/` (o Rafael traz depois).
 >
 > ### 🏁 MVP anterior: `driving_oval_v4` (decidido em 2026-10-09)
 > Foi o primeiro modelo a dar voltas seguidas no oval real. Em 2026-10-12, no teste lado a lado,
