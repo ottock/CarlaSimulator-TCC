@@ -16,7 +16,9 @@ Duas coisas que quem usa este modulo precisa saber:
 Sem Jetson: ``botoes`` so decodifica bytes e ``Controle`` recebe o dispositivo
 pronto, entao os dois sao testaveis sem pyusb.
 """
+import collections
 import errno
+import struct
 
 ID_FABRICANTE = 0x2DC8
 ID_PRODUTO = 0x310A
@@ -32,6 +34,27 @@ _TAMANHO_LEITURA = 64
 START = 1 << 4
 BACK = 1 << 5
 HOME = 1 << 10
+
+
+#: Tudo o que um relatorio diz. Gatilhos de 0 a 255; analogicos de -32768 a
+#: 32767 (``ex``/``ey`` o esquerdo, ``dx``/``dy`` o direito; lado e vertical).
+#: Visto no Jetson: o esquerdo vai de ponta a ponta e volta a 0 exato quando
+#: solto. Sentido dos eixos pelo padrao do Xbox 360 (direita e cima positivos),
+#: a conferir no carro.
+Estado = collections.namedtuple("Estado", "botoes lt rt ex ey dx dy")
+
+
+def estado(relatorio):
+    """``Estado`` do relatorio, ou ``None`` se ele nao traz os analogicos.
+
+    Um relatorio cortado nao e completado com zeros: zero no analogico e um
+    volante reto que ninguem pediu.
+    """
+    if relatorio is None or len(relatorio) < 14 or relatorio[0] != 0x00:
+        return None
+    ex, ey, dx, dy = struct.unpack_from("<4h", bytes(relatorio), 6)
+    return Estado(botoes=relatorio[2] | (relatorio[3] << 8),
+                  lt=relatorio[4], rt=relatorio[5], ex=ex, ey=ey, dx=dx, dy=dy)
 
 
 class ControlePerdido(Exception):

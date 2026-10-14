@@ -11,7 +11,9 @@
   (biblioteca `pyusb`). O caminho normal do Linux (`/dev/input/js0`) **não entrega eventos**
   neste kernel; a seção 5 conta por quê.
 - **Largar e parar pelo controle (seção 6):** `hardware/largada_controle.py` inicia a corrida no
-  Start e para no Back. Está escrito e testado no PC, e ainda não foi rodado no Jetson.
+  Start e para no Back. Funciona no carro desde 2026-10-14, rodando sem `sudo`.
+- **Dirigir com o controle (seção 8):** `hardware/controle_8bitdo.py`, volante no analógico e
+  acelerador no RT. Escrito e testado no PC em 2026-10-14; ainda não rodado no Jetson.
 
 ## 2. Como ler o controle
 
@@ -67,7 +69,7 @@ dizer que a posição vem do padrão, mas ainda não apertamos esse comando olha
 | Bytes | Conteúdo | Situação |
 |---|---|---|
 | 0–1 | `00 14` (tipo e tamanho) | visto |
-| 2 | bits 0–3: direcional (cima, baixo, esquerda, direita); bit 4: Start; bit 5: Back; bits 6–7: L3, R3 | a conferir |
+| 2 | bits 0–3: direcional (cima, baixo, esquerda, direita); bit 4: Start; bit 5: Back; bits 6–7: L3, R3 | Start e Back vistos (2026-10-14: o script larga e para a corrida no carro); o resto a conferir |
 | 3 | bits 0–1: LB, RB; bit 2: Home; bits 4–7: A, B, X, Y | Home visto; o resto a conferir |
 | 4, 5 | gatilhos LT e RT, de 0 a 255 | a conferir |
 | 6–7, 8–9 | analógico esquerdo, lado e vertical (inteiro de 16 bits, byte baixo primeiro) | visto: vai de −1,00 a +1,00 e volta a 0 exato quando solto |
@@ -128,8 +130,8 @@ Fontes: [xpad do kernel 4.9](https://github.com/torvalds/linux/blob/v4.9/drivers
 
 ## 6. Largar e parar pelo controle
 
-**Estado em 2026-10-13: escrito e testado no PC; ainda NÃO rodado no Jetson.** O primeiro uso é
-com as rodas no ar.
+**Estado em 2026-10-14: funcionando no carro.** Rodado no Jetson sem `sudo`, com a regra de
+permissão da seção 7: o Rafael relatou que funcionou perfeitamente.
 
 Definido pelo Rafael no mesmo dia: **Start inicia a corrida** e **Back, o botão ao lado do
 Start, para**. Só esses dois botões; não há segundo botão de largada.
@@ -180,8 +182,11 @@ Antes:
 
 - com `hardware/pad_teste.py`, conferir que Start e o botão ao lado aparecem como `start` e
   `back`. Se os nomes vierem trocados ou diferentes, não rode o script: avise.
-- decidir entre `sudo` e a regra de permissão da seção 7. Com `sudo` o script avisa na tela que
-  a corrida vai rodar como root, o que nunca foi testado.
+- criar a regra de permissão da seção 7 e rodar o script **sem `sudo`**. Com `sudo` a corrida
+  não sobe: em 2026-10-14 o runtime, rodando como root, parou no `import pycuda` com
+  `libcurand.so.10: cannot open shared object file`. O `sudo` limpa as variáveis de ambiente,
+  e com elas, muito provavelmente, o `LD_LIBRARY_PATH` que aponta para as bibliotecas do CUDA.
+  Nada se moveu, e o script voltou a esperar o Start normalmente.
 
 Depois, nesta ordem:
 
@@ -206,13 +211,13 @@ sinal de verdade chegando ao runtime, e as posições de Start e Back no relató
 
 - **Proteção se o controle desligar.** No modo autônomo, perder o controle só tira o botão de
   parar à distância: o carro continua parando sozinho no fim da pista, no limite de tempo e na
-  parada frontal. Uma proteção barata é tratar **Home apertado como parar**, já que ele aparece
-  antes de o controle desligar. Se um dia o visitante dirigir pelo controle, falta uma proteção
-  maior: parar o carro quando não chegar relatório novo por um tempo curto. Bateria acabando e
-  interferência não avisam.
+  parada frontal. Na direção manual (seção 8) o Home já para o carro e há uma parada por
+  silêncio; o tempo dela (0,5 s) ainda é um palpite.
 - **Teste de silêncio** (`hardware/pad_silencio.py`, ainda não rodado). Mede por quanto tempo o
-  adaptador fica mudo com alguém segurando um comando. Decide qual comando pode ser o "segurar
-  para andar" e qual o tempo de silêncio tolerado.
+  adaptador fica mudo com alguém segurando um comando. É o dado para escolher o `--silencio-s`
+  da direção manual.
+- **Parada frontal na direção manual.** O `controle_8bitdo.py` não lê o LiDAR, então não tem a
+  parada de 6 cm do runtime. Para visitante dirigir, ela deveria entrar antes.
 - **Conferir o que está "a conferir" na seção 3:** A, B, Start, Back, gatilhos, analógico
   direito e o sentido dos eixos.
 - **Religar o controle depois de desligado:** os dados voltam sem reenviar os dois comandos? Só
@@ -227,3 +232,59 @@ sinal de verdade chegando ao runtime, e as posições de Start e Back no relató
   depois de cada troca de bateria.
 - **Descobrir qual dos dois comandos destrava o envio** (seção 5).
 - **Bateria do controle:** o fabricante informa 19 horas em 2.4G e 2 horas de carga. Não medido.
+
+## 8. Dirigir com o controle
+
+**Estado em 2026-10-14: escrito e testado no PC; ainda NÃO rodado no Jetson.** O primeiro uso é
+com as rodas no ar.
+
+`hardware/controle_8bitdo.py` é o `controle_teste.py` com o controle no lugar do teclado. Volante
+e acelerador são proporcionais, por decisão do Rafael em 2026-10-14. Roda só no terminal, sem
+monitor no carro, e sem `sudo`.
+
+```bash
+python3 hardware/controle_8bitdo.py
+python3 hardware/controle_8bitdo.py --max-us 1650     # teto mais baixo
+```
+
+| Comando | O que faz |
+|---|---|
+| Analógico esquerdo, para os lados | Volante proporcional. Centro 1500 µs; batentes 1800 µs (esquerda) e 1200 µs (direita), span 300. O modelo usa 350 (1850/1150 µs), e com 300 a curva mais fechada pode não sair à mão; o Rafael escolheu começar em 300 para testar (2026-10-14). `--span 350` iguala ao modelo. O teclado usa ±260, tudo ou nada. |
+| RT | Acelerador proporcional ao curso: de 1600 µs, o mínimo que move o ESC, até 1700 µs, o máximo calibrado. Abaixo de 10% do curso conta como solto. `--max-us` baixa o teto. |
+| LT | Ré, a 1400 µs fixos, como a seta para baixo do teclado. |
+| Back ou Home | Parada. Para andar de novo, é preciso soltar os dois gatilhos. |
+| Ctrl+C | Servo no centro, ESC em neutro, e sai. |
+
+A lógica está em `src/ai/car/manual.py`. Proteções:
+
+- `ESC_ARMADO` no arquivo, como no `controle_teste.py` (`True`: o carro anda).
+- Laço travado por mais de 0,25 s: ESC em neutro naquele quadro.
+- **Silêncio:** com o carro andando, 0,5 s sem relatório do controle param o carro, e ele volta
+  no relatório seguinte. Existe porque o adaptador não avisa quando o controle desliga (seção 4).
+  O preço: segurar o RT no fundo com o analógico parado também é silêncio e pode parar o carro
+  numa reta. O tempo muda com `--silencio-s`.
+- Adaptador sumiu da USB: para e sai. Saída sempre com servo no centro e ESC em neutro.
+
+O que ele **não** tem: a parada frontal do LiDAR. O runtime corta o motor quando algo fica a
+menos de 6 cm à frente; aqui, quem dirige pode bater na parede na velocidade que estiver
+mandando.
+
+### Primeiro teste, com as rodas no ar
+
+1. `python3 hardware/controle_8bitdo.py`. Ele põe o ESC em neutro por 2 s antes de liberar.
+2. Analógico para a direita: as rodas devem ir para a direita. **Se forem ao contrário, pare
+   aqui.** A troca é `SINAL_DO_ANALOGICO` em `src/ai/car/manual.py`.
+3. RT devagar: as rodas começam a girar perto de 10% do curso e aceleram até o fundo.
+4. LT: ré.
+5. Com o RT apertado, Back: as rodas param e continuam paradas enquanto o RT segue apertado.
+   Soltar e apertar o RT de novo: voltam a girar.
+6. RT no fundo e o analógico parado por alguns segundos. Se aparecer `SEM NOTICIAS DO CONTROLE`
+   e as rodas pararem sozinhas, é a parada por silêncio disparando com a mão parada. Anote:
+   é o dado para escolher o `--silencio-s`.
+7. Com o RT apertado, desligar o controle (segurar o Home): as rodas param.
+8. Ctrl+C: servo no centro, ESC em neutro, e o programa sai.
+
+Testado no PC (`tests/test_car_manual.py` e um ensaio do programa inteiro com PCA9685 e
+adaptador de mentira): volante, acelerador, ré, parada por Back/Home e por silêncio, e a saída
+em estado seguro. **Não testado:** o sentido do analógico no carro, a ré no ESC de verdade e a
+parada por silêncio com o controle real.

@@ -629,12 +629,15 @@ No fim do closed-loop o harness imprime, por rota:
 
 ## 7. Próximos passos
 
-- **PRÓXIMO PASSO (2026-10-13): testar no carro a largada pelo controle.**
+- **Largada pelo controle: FUNCIONANDO no carro (2026-10-14).**
   `hardware/largada_controle.py` inicia o `hardware/jetson_runtime.py` quando se aperta Start no
-  controle 8BitDo e o interrompe no Back, o botão ao lado. Está escrito e testado no PC (38
-  testes), e **ainda não foi rodado no Jetson**: o primeiro uso é com as rodas no ar. O controle
-  já é lido no Jetson, direto pela USB. O que foi descoberto para chegar aí, o roteiro do
-  primeiro teste e as pendências estão em `docs/CONTROLE_8BITDO.md`.
+  controle 8BitDo e o interrompe no Back, o botão ao lado. Roda **sem `sudo`** (com `sudo` a
+  corrida não acha as bibliotecas do CUDA). O controle é lido direto pela USB. Tudo o que foi
+  descoberto e as pendências estão em `docs/CONTROLE_8BITDO.md`.
+- **Dirigir com o controle: escrito, falta o carro (2026-10-14).** `hardware/controle_8bitdo.py`
+  é o `controle_teste.py` com o controle 8BitDo: volante no analógico esquerdo, acelerador
+  proporcional no RT (1600–1700 µs), ré no LT. Testado no PC; o primeiro uso no Jetson é com as
+  rodas no ar (roteiro na seção 8 de `docs/CONTROLE_8BITDO.md`).
 
 - **Cruzamento (§5.3): DECIDIDO — aceito.** Não vamos resolver a ambiguidade de
   cruzamento no Town; a pista custom 1:12 é fechada e não tem cruzamentos.

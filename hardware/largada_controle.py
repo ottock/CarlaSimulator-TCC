@@ -40,12 +40,11 @@ COMO USAR
   Qualquer flag que este script nao conhece vai direto para o runtime:
       python3 hardware/largada_controle.py --seconds 120
 
-  Ler o adaptador sem sudo exige a regra de permissao da secao 7 de
-  docs/CONTROLE_8BITDO.md. Com sudo funciona, mas a corrida roda como root.
+  SEM sudo: ler o adaptador como usuario normal exige a regra de permissao da
+  secao 7 de docs/CONTROLE_8BITDO.md. Com sudo o script recusa rodar: em
+  2026-10-14 a corrida, como root, nao achou as bibliotecas do CUDA.
 
-PRIMEIRA VEZ: rodas no ar. Escrito em 2026-10-13 e ainda NAO rodado no Jetson;
-a logica (ai/car/largada.py, ai/car/gamepad.py) foi testada no PC com um
-controle e um runtime de mentira.
+Funcionando no carro desde 2026-10-14 (escrito em 2026-10-13).
 """
 import argparse
 import datetime
@@ -92,6 +91,11 @@ def main(argv=None):
     a, extras = p.parse_known_args(argv)
 
     # Melhor descobrir agora do que depois de apertar Start.
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        sys.exit("Nao rode com sudo. Como root a corrida nao acha as bibliotecas do "
+                 "CUDA\n(libcurand.so.10, visto em 2026-10-14): o sudo limpa as "
+                 "variaveis de ambiente.\nRode como o usuario normal, com a regra "
+                 "de permissao do adaptador\n(docs/CONTROLE_8BITDO.md, secao 7).")
     for caminho in (a.engine, a.config):
         if not os.path.exists(os.path.join(_REPO, caminho)):
             sys.exit("nao achei {0} em {1}".format(caminho, _REPO))
@@ -107,10 +111,6 @@ def main(argv=None):
         sys.exit("nao consegui abrir o adaptador: {0}\n"
                  "Sem sudo, e preciso da regra de permissao "
                  "(docs/CONTROLE_8BITDO.md, secao 7).".format(erro))
-
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
-        print("AVISO: rodando como root. A corrida tambem roda como root, o que")
-        print("       nunca foi testado, e os logs em runs/ ficam com outro dono.")
 
     def inicia():
         out = pasta_da_corrida(a.engine, datetime.datetime.now())

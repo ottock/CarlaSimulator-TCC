@@ -10,7 +10,8 @@ from array import array
 
 import pytest
 
-from ai.car.gamepad import BACK, HOME, START, Controle, ControlePerdido, botoes
+from ai.car.gamepad import (BACK, HOME, START, Controle, ControlePerdido, Estado,
+                            botoes, estado)
 
 REPOUSO = bytes.fromhex("0014000000000000000000000000101c30640010")
 ANALOGICO_NO_FIM = bytes.fromhex("001400000000ff7f030400000000101c30640010")
@@ -57,6 +58,44 @@ def test_a_truncated_report_is_not_decoded():
 
 def test_a_message_of_another_type_is_not_decoded():
     assert botoes(b"\x08" + REPOUSO[1:]) is None
+
+
+# ------------------------------------------------- analogicos e gatilhos
+
+def test_a_report_at_rest_has_sticks_and_triggers_at_zero():
+    assert estado(REPOUSO) == Estado(botoes=0, lt=0, rt=0, ex=0, ey=0, dx=0, dy=0)
+
+
+def test_the_left_stick_at_the_end_of_its_travel():
+    # Bytes reais: "ff 7f" = +32767 no lado, "03 04" = 1027 na vertical.
+    e = estado(ANALOGICO_NO_FIM)
+    assert (e.ex, e.ey) == (32767, 1027)
+
+
+def test_stick_values_are_signed():
+    # Linha real do meio da varredura: "02 1b" = 6914 e "e1 d8" = -10015.
+    e = estado(bytes.fromhex("001400000000021be1d800000000101c30640010"))
+    assert (e.ex, e.ey) == (6914, -10015)
+
+
+def test_the_triggers_come_in_bytes_4_and_5():
+    e = estado(bytes([0x00, 0x14, 0x00, 0x00, 0x80, 0xFF]) + REPOUSO[6:])
+    assert (e.lt, e.rt) == (128, 255)
+
+
+def test_the_right_stick_comes_after_the_left_one():
+    r = REPOUSO[:10] + bytes([0x00, 0x80, 0xFF, 0x7F]) + REPOUSO[14:]
+    e = estado(r)
+    assert (e.dx, e.dy, e.ex, e.ey) == (-32768, 32767, 0, 0)
+
+
+def test_a_report_too_short_for_the_sticks_is_not_decoded():
+    # Ler analogico de um relatorio cortado inventaria um volante.
+    assert estado(REPOUSO[:13]) is None
+
+
+def test_a_message_of_another_type_has_no_sticks():
+    assert estado(b"\x08" + REPOUSO[1:]) is None
 
 
 class Adaptador(object):
