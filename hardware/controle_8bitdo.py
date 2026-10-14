@@ -14,8 +14,8 @@ COMANDOS
                                       span 300 us para comecar (o modelo usa
                                       350; --span 350 iguala).
   RT                                  acelerador, de 1600 us (o minimo que move)
-                                      ate --max-us (padrao 1700, o maximo
-                                      calibrado). Soltou, para.
+                                      ate --max-us (padrao 1630; o maximo
+                                      calibrado e 1700). Soltou, para.
   LT                                  re, a 1400 us fixos, como no teclado.
   Back ou Home                        parada. Para andar de novo, solte os dois
                                       gatilhos e aperte outra vez.
@@ -40,7 +40,7 @@ O QUE ELE NAO TEM
 COMO USAR
   cd ~/CarlaSimulator-TCC
   python3 hardware/controle_8bitdo.py
-  python3 hardware/controle_8bitdo.py --max-us 1650     # teto mais baixo
+  python3 hardware/controle_8bitdo.py --max-us 1650     # teto mais alto
   Controle ligado (chave traseira em 2.4G, luz do Home fixa). Sem sudo: precisa
   da regra de permissao do adaptador (docs/CONTROLE_8BITDO.md, secao 7).
 
@@ -80,6 +80,11 @@ ESC_CHANNEL = 12
 # a mao. Para o mesmo batente do modelo: --span 350.
 SPAN_INICIAL_US = 300
 
+# Teto do acelerador (RT no fundo). Era 1700, o maximo calibrado do ESC; no
+# teste de 2026-10-14 o Rafael achou rapido demais e baixou para 1630. A IA anda
+# a 1610 fixos. Para subir: --max-us, ate 1700.
+MAX_INICIAL_US = 1630
+
 WATCHDOG_S = 0.25
 # Prazo de cada leitura do controle. Curto, para o laco girar (e o silencio ser
 # percebido) mesmo quando o controle nao manda nada.
@@ -118,9 +123,9 @@ class Atuadores(object):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Dirige o carro com o controle 8BitDo.")
-    p.add_argument("--max-us", type=int, default=ESC_MAX_US,
-                   help="Teto do acelerador (RT no fundo), de 1600 a 1700 us "
-                        "(padrao %d)" % ESC_MAX_US)
+    p.add_argument("--max-us", type=int, default=MAX_INICIAL_US,
+                   help="Teto do acelerador (RT no fundo), de 1600 a %d us "
+                        "(padrao %d)" % (ESC_MAX_US, MAX_INICIAL_US))
     p.add_argument("--span", type=int, default=SPAN_INICIAL_US,
                    help="Meia-faixa do servo em us (padrao %d; o modelo usa %d)"
                         % (SPAN_INICIAL_US, STEER_SPAN_US))

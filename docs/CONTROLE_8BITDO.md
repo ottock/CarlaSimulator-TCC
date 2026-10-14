@@ -244,13 +244,13 @@ monitor no carro, e sem `sudo`.
 
 ```bash
 python3 hardware/controle_8bitdo.py
-python3 hardware/controle_8bitdo.py --max-us 1650     # teto mais baixo
+python3 hardware/controle_8bitdo.py --max-us 1650     # teto mais alto
 ```
 
 | Comando | O que faz |
 |---|---|
 | Analógico esquerdo, para os lados | Volante proporcional. Centro 1500 µs; batentes 1800 µs (esquerda) e 1200 µs (direita), span 300. O modelo usa 350 (1850/1150 µs), e com 300 a curva mais fechada pode não sair à mão; o Rafael escolheu começar em 300 para testar (2026-10-14). `--span 350` iguala ao modelo. O teclado usa ±260, tudo ou nada. |
-| RT | Acelerador proporcional ao curso: de 1600 µs, o mínimo que move o ESC, até 1700 µs, o máximo calibrado. Abaixo de 10% do curso conta como solto. `--max-us` baixa o teto. |
+| RT | Acelerador proporcional ao curso: de 1600 µs, o mínimo que move o ESC, até 1630 µs. Era até 1700 µs, o máximo calibrado; no primeiro teste o Rafael achou rápido demais e baixou para 1630 (2026-10-14). A IA anda a 1610 fixos. Abaixo de 10% do curso conta como solto. `--max-us` muda o teto, até 1700. |
 | LT | Ré, a 1400 µs fixos, como a seta para baixo do teclado. |
 | Back ou Home | Parada. Para andar de novo, é preciso soltar os dois gatilhos. |
 | Ctrl+C | Servo no centro, ESC em neutro, e sai. |
