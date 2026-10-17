@@ -110,3 +110,21 @@ class RunLogger:
             imgs = (np.stack(self._inputs) if self._inputs
                     else np.zeros((0, 66, 200, 3), dtype=np.uint8))
             np.save(os.path.join(self.out_dir, "model_input.npy"), imgs)
+
+
+class LogNulo:
+    """Aceita as mesmas chamadas do ``RunLogger`` e nao grava nada.
+
+    O padrao do programa do controle desde 2026-10-17: corrida sem gravacao,
+    para nao gastar tempo de quadro nem disco (o do carro e pequeno). Com
+    ``--grava`` o programa usa o ``RunLogger`` de verdade.
+    """
+
+    def log_frame(self, **campos):
+        pass
+
+    def log_scan(self, **campos):
+        pass
+
+    def close(self):
+        pass

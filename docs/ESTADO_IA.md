@@ -629,14 +629,17 @@ No fim do closed-loop o harness imprime, por rota:
 
 ## 7. Próximos passos
 
-- **Programa único do controle 8BitDo (2026-10-17): escrito, falta o carro.**
+- **Programa do controle 8BitDo com a corrida dentro (2026-10-17): escrito, falta o carro.**
   `hardware/controle_8bitdo.py` dirige à mão (volante no analógico esquerdo, acelerador
-  proporcional no RT até 1630 µs, ré no LT) e, no Start, estaciona o carro e lança o
-  `hardware/jetson_runtime.py`; Back para a corrida. Durante a corrida o programa não escreve no
-  PCA9685. Os dois modos funcionaram no carro em programas separados (2026-10-14); juntos,
-  testados só no PC. Roda **sem `sudo`** (com `sudo` a corrida não acha as bibliotecas do CUDA).
-  O que foi descoberto, o roteiro do primeiro teste e as pendências estão em
-  `docs/CONTROLE_8BITDO.md`.
+  proporcional no RT até 1630 µs, ré no LT a 1380 µs) e, no Start, roda a corrida do modelo
+  **dentro do próprio programa**: o modelo, a câmera e o LiDAR são abertos uma vez, quando ele
+  abre, e o Start só começa a chamar o `DriveLoop`. O carro anda em ~1 s (a trava de arranque) e
+  o Back para na hora. Para isso o `main()` do `jetson_runtime.py` foi dividido em
+  `cria_parser`, `abre_componentes`, `meta_da_corrida` e `cria_laco`, sem mudar o que ele faz
+  (conferido rodando os dois `main()` com componentes de mentira). Gravações desligadas por
+  padrão (`--grava` liga). A versão anterior, que lançava o runtime como outro programa,
+  funcionou no carro; esta foi testada só no PC. Roda **sem `sudo`**. O que foi descoberto, o
+  roteiro do primeiro teste e as pendências estão em `docs/CONTROLE_8BITDO.md`.
 
 - **Cruzamento (§5.3): DECIDIDO — aceito.** Não vamos resolver a ambiguidade de
   cruzamento no Town; a pista custom 1:12 é fechada e não tem cruzamentos.

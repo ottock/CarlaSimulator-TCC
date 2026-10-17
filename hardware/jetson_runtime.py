@@ -282,7 +282,9 @@ class Pca9685Actuator:
         self._set_us(ESC_CHANNEL, ESC_NEUTRAL_US)
 
 
-def main():
+def cria_parser():
+    """As opcoes do runtime. Fora do main() para o hardware/controle_8bitdo.py
+    montar a corrida com os MESMOS padroes, sem copia-los."""
     p = argparse.ArgumentParser(description="Runtime do modelo no carro (Fase 6b)")
     p.add_argument("--engine", required=True, help="Arquivo .engine do TensorRT")
     p.add_argument("--config", required=True, help="Sidecar .json do modelo")
@@ -355,7 +357,63 @@ def main():
     p.add_argument("--flip-method", type=int, default=FLIP_METHOD,
                    help="Rotacao da camera: 0 = sem giro (padrao), 2 = 180 graus. "
                         "Imagem invertida e entrada fora da distribuicao de treino.")
-    a = p.parse_args()
+    return p
+
+
+def abre_componentes(a, cfg):
+    """Camera, LiDAR e engine ja aquecida: a parte que demora para abrir.
+
+    O main() chama a cada execucao; o hardware/controle_8bitdo.py chama UMA vez
+    e reaproveita entre corridas.
+    """
+    camera = CsiCamera(flip_method=a.flip_method)
+    lidar = SerialLidar(dist_offset_m=a.lidar_dist_offset)
+    engine = TrtEngine(a.engine)
+    # Aquecimento: a primeira inferencia aloca memoria e inicializa kernels.
+    # Dentro do laco ela travava o arranque (ate 9 s em 2026-10-07), e o LiDAR
+    # enchia a fila nesse tempo. Aqui ela acontece com o ESC ainda em neutro.
+    for _ in range(3):
+        engine.infer(np.zeros((3, 66, 200), dtype=np.float32),
+                     np.ones(cfg["n_sectors"], dtype=np.float32))
+    return camera, lidar, engine
+
+
+def meta_da_corrida(a, cfg, max_range):
+    """O meta.json de uma corrida: tudo o que a deixa comparavel com as outras."""
+    return {
+        "fov_deg": cfg["fov_deg"], "n_sectors": cfg["n_sectors"],
+        "max_range_m_car": max_range, "scale": a.scale,
+        "crop_frac": a.crop_frac, "esc_armado": ESC_ARMADO,
+        "cruise_us": a.cruise_us, "stop_dist_m": a.stop_dist,
+        "flip_method": a.flip_method,
+        "lidar_offset_deg": a.lidar_offset_deg, "lidar_invert": a.lidar_invert,
+        "lidar_dist_offset_m": a.lidar_dist_offset,
+        "steer_span_us": a.steer_span_us, "steer_gain": a.steer_gain,
+        "steer_median": a.steer_median,
+        "arranque_s": a.arranque_s,
+        "beco_dist_m": a.beco_dist,
+        "log_inputs": a.log_inputs,
+        "self_occlusion": a.self_occlusion,
+        "engine": os.path.basename(a.engine),
+    }
+
+
+def cria_laco(a, cfg, max_range, arcos, camera, lidar, engine, actuator, logger):
+    """O DriveLoop de uma corrida, com as opcoes do runtime. Estado novo a cada
+    chamada: trava de arranque, fim de pista e filtro do esterco comecam zerados."""
+    return DriveLoop(camera=camera, lidar=lidar, engine=engine, actuator=actuator,
+                     logger=logger, fov_deg=cfg["fov_deg"], max_range=max_range,
+                     crop_frac=a.crop_frac, n_sectors=cfg["n_sectors"],
+                     cruise_us=a.cruise_us, stop_dist_m=a.stop_dist,
+                     lidar_offset_deg=a.lidar_offset_deg,
+                     lidar_invert=a.lidar_invert, self_occlusion=arcos,
+                     steer_span_us=a.steer_span_us, steer_gain=a.steer_gain,
+                     steer_median=a.steer_median, arranque_s=a.arranque_s,
+                     beco_dist_m=a.beco_dist)
+
+
+def main():
+    a = cria_parser().parse_args()
 
     arcos = parse_arcs(a.self_occlusion)   # erra alto se o formato estiver errado
     cfg = load_model_config(a.config)
@@ -383,43 +441,13 @@ def main():
         print("!!! O CARRO VAI ANDAR a {0}us constantes. Kill switch na mao. !!!"
               .format(a.cruise_us))
 
-    camera = CsiCamera(flip_method=a.flip_method)
-    lidar = SerialLidar(dist_offset_m=a.lidar_dist_offset)
-    engine = TrtEngine(a.engine)
-    # Aquecimento: a primeira inferencia aloca memoria e inicializa kernels.
-    # Dentro do laco ela travava o arranque (ate 9 s em 2026-10-07), e o LiDAR
-    # enchia a fila nesse tempo. Aqui ela acontece com o ESC ainda em neutro.
-    for _ in range(3):
-        engine.infer(np.zeros((3, 66, 200), dtype=np.float32),
-                     np.ones(cfg["n_sectors"], dtype=np.float32))
+    camera, lidar, engine = abre_componentes(a, cfg)
     actuator = Pca9685Actuator()
     actuator.safe_state()
-    logger = RunLogger(a.out, meta={
-        "fov_deg": cfg["fov_deg"], "n_sectors": cfg["n_sectors"],
-        "max_range_m_car": max_range, "scale": a.scale,
-        "crop_frac": a.crop_frac, "esc_armado": ESC_ARMADO,
-        "cruise_us": a.cruise_us, "stop_dist_m": a.stop_dist,
-        "flip_method": a.flip_method,
-        "lidar_offset_deg": a.lidar_offset_deg, "lidar_invert": a.lidar_invert,
-        "lidar_dist_offset_m": a.lidar_dist_offset,
-        "steer_span_us": a.steer_span_us, "steer_gain": a.steer_gain,
-        "steer_median": a.steer_median,
-        "arranque_s": a.arranque_s,
-        "beco_dist_m": a.beco_dist,
-        "log_inputs": a.log_inputs,
-        "self_occlusion": a.self_occlusion,
-        "engine": os.path.basename(a.engine),
-    }, jpeg_every=a.jpeg_every, log_inputs=a.log_inputs)
+    logger = RunLogger(a.out, meta=meta_da_corrida(a, cfg, max_range),
+                       jpeg_every=a.jpeg_every, log_inputs=a.log_inputs)
 
-    loop = DriveLoop(camera=camera, lidar=lidar, engine=engine, actuator=actuator,
-                     logger=logger, fov_deg=cfg["fov_deg"], max_range=max_range,
-                     crop_frac=a.crop_frac, n_sectors=cfg["n_sectors"],
-                     cruise_us=a.cruise_us, stop_dist_m=a.stop_dist,
-                     lidar_offset_deg=a.lidar_offset_deg,
-                     lidar_invert=a.lidar_invert, self_occlusion=arcos,
-                     steer_span_us=a.steer_span_us, steer_gain=a.steer_gain,
-                     steer_median=a.steer_median, arranque_s=a.arranque_s,
-                     beco_dist_m=a.beco_dist)
+    loop = cria_laco(a, cfg, max_range, arcos, camera, lidar, engine, actuator, logger)
 
     # O LiDAR comecou a transmitir no SerialLidar(), antes da engine carregar:
     # o que esta na fila agora e o passado. Fora com ele.

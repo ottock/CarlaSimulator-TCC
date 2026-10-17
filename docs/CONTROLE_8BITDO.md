@@ -11,8 +11,9 @@
   (biblioteca `pyusb`). O caminho normal do Linux (`/dev/input/js0`) **não entrega eventos**
   neste kernel; a seção 5 conta por quê.
 - **O programa do controle (seções 6 e 8):** `hardware/controle_8bitdo.py` dirige o carro à mão
-  e, no Start, larga a corrida autônoma; Back para. Os dois modos funcionaram no carro em
-  programas separados em 2026-10-14. Juntos desde 2026-10-17, **ainda não rodado no Jetson**.
+  e, no Start, roda a corrida autônoma; Back para. Juntos, os dois modos funcionaram no carro em
+  2026-10-17. No mesmo dia a corrida passou a rodar **dentro** do programa, com o modelo carregado
+  uma vez, para largar e parar na hora; essa versão **ainda não rodou no Jetson**.
 
 ## 2. Como ler o controle
 
@@ -129,38 +130,50 @@ Fontes: [xpad do kernel 4.9](https://github.com/torvalds/linux/blob/v4.9/drivers
 
 ## 6. Largar e parar a corrida pelo controle
 
-**Funcionou no carro em 2026-10-14**, como programa separado (`hardware/largada_controle.py`),
-rodando sem `sudo`. **Desde 2026-10-17 faz parte do `hardware/controle_8bitdo.py`** (seção 8),
-a pedido do Rafael; o programa separado foi removido.
-
 Definido pelo Rafael: **Start inicia a corrida** e **Back, o botão ao lado do Start, para**.
 Não há segundo botão de largada.
 
-"Corrida" é o `hardware/jetson_runtime.py` rodando o modelo, com o comando do topo da seção 2
-de `docs/ESTADO_IA.md`. O programa lança esse mesmo comando; não mexe no modelo, no esterço nem
-no ESC do runtime. Cada corrida grava numa pasta nova em `runs/`, e qualquer flag que o
-programa não conhece vai direto para o runtime (por exemplo `--seconds 120`).
+Como isso evoluiu:
 
-Três regras que estão no código de propósito (`src/ai/car/largada.py`):
+1. **2026-10-14, programa separado** (`hardware/largada_controle.py`, removido): o Start lançava
+   o `jetson_runtime.py` como outro programa e o Back mandava a ele o sinal do Ctrl+C. Funcionou
+   no carro. Mas cada corrida carregava CUDA, câmera, LiDAR e modelo do zero (1 a 2 minutos,
+   nunca cronometrado), e depois do Back o manual só voltava quando aquele programa terminava de
+   fechar a câmera.
+2. **2026-10-17, juntado ao `hardware/controle_8bitdo.py`** (seção 8), ainda lançando o runtime
+   como outro programa. Funcionou no carro.
+3. **2026-10-17, corrida dentro do programa**, a pedido do Rafael ("o objetivo é ser algo mais
+   rápido"). O modelo, a câmera e o LiDAR são abertos **uma vez**, quando o programa abre. O
+   Start só começa a chamar o laço de direção do runtime: o mesmo `DriveLoop`, montado pelas
+   mesmas funções e com as mesmas opções que o `jetson_runtime.py` usa (`cria_parser`,
+   `abre_componentes`, `cria_laco`, separadas do `main()` dele sem mudar o que ele faz). O carro
+   anda depois da trava de arranque do runtime (cerca de 1 s com os sensores em dia), e o Back
+   para na hora. **Esta versão ainda não rodou no Jetson.**
 
-1. **Conta o instante em que o botão é apertado, não o botão estar apertado.** Como o adaptador
-   não zera o estado quando o controle desliga (seção 4), um Start "preso" largaria uma corrida
-   atrás da outra.
-2. **Depois de um sinal de parada, outro só sai passados 3 segundos.** Um segundo Ctrl+C pode
-   cair dentro da limpeza do runtime e interrompê-la antes de o ESC ir a neutro.
-3. **O runtime nunca é morto à força.** Matar pula a limpeza, e o PCA9685 continua mandando o
-   último pulso: o carro seguiria andando. Se o runtime não responder, o programa avisa na tela
-   e o que resta é a chave do carro.
+Regras que estão no código de propósito (`src/ai/car/controle_unico.py`):
+
+- **Conta o instante em que o botão é apertado, não o botão estar apertado.** Como o adaptador
+  não zera o estado quando o controle desliga (seção 4), um Start "preso" largaria uma corrida
+  atrás da outra.
+- **Cada corrida começa com estado novo:** trava de arranque, parada de fim de pista e filtro do
+  esterço zerados, e a fila do LiDAR (que seguiu chegando enquanto o carro andava à mão) é
+  jogada fora antes do primeiro quadro.
+- **Quem escreve na placa é um só.** Durante a corrida, só o laço do modelo; à mão, só o
+  controle.
+- **A corrida acaba sozinha** no limite de tempo (`--seconds`, padrão 60) ou se o laço do modelo
+  der erro (câmera, I2C...). Nos dois casos o carro é estacionado e o manual volta.
+
+Gravações: **desligadas por padrão**, para não gastar tempo de quadro nem o disco pequeno do
+carro. Com `--grava`, cada corrida volta a ter a sua pasta em `runs/`, com o mesmo conteúdo que
+o runtime gravava.
 
 O que não resolve:
 
-- **O modelo é carregado de novo a cada corrida.** Entre apertar Start e o carro andar passa o
-  mesmo tempo de quando o comando é digitado (estimado em 1 a 2 minutos, nunca cronometrado).
-  Resolver isso é manter o modelo carregado entre uma corrida e outra, e é outro passo.
-- **No fim da pista o carro para, mas o runtime continua** até acabar o tempo (`--seconds`,
-  padrão 60). É preciso apertar Back antes de largar de novo ou de voltar a dirigir.
+- **No fim da pista o carro para, mas a corrida continua** até o Back ou o fim do tempo.
 - **Se o controle desligar no meio da corrida, não há Back.** O carro para sozinho no fim da
   pista, na parada frontal ou no fim do tempo.
+- **A espera passou para a abertura do programa:** carregar tudo continua levando o mesmo tempo,
+  uma vez. Depois disso a câmera e o LiDAR ficam ligados o tempo todo, inclusive dirigindo à mão.
 
 **Não rode com `sudo`.** Em 2026-10-14, com `sudo`, o runtime parou no `import pycuda` com
 `libcurand.so.10: cannot open shared object file`: o `sudo` limpa as variáveis de ambiente e,
@@ -195,19 +208,22 @@ recusa rodar como root. Ler o adaptador sem `sudo` exige a regra de permissão d
 
 ## 8. O programa do controle: dirigir à mão e largar a corrida
 
-**Estado em 2026-10-17:** os dois modos funcionaram no carro em programas separados
-(2026-10-14). **Juntos, no `hardware/controle_8bitdo.py`, ainda não rodaram no Jetson**: o
-primeiro uso é com as rodas no ar. Roda só no terminal, sem monitor no carro, e **sem `sudo`**.
+**Estado em 2026-10-17:** juntos, o modo manual e a corrida funcionaram no carro. A versão com
+a corrida **dentro** do programa (seção 6, item 3) ainda não rodou no Jetson: o primeiro uso é
+com as rodas no ar. Roda só no terminal, sem monitor no carro, e **sem `sudo`**.
 
 ```bash
 python3 hardware/controle_8bitdo.py
+python3 hardware/controle_8bitdo.py --grava           # cada corrida numa pasta em runs/
 python3 hardware/controle_8bitdo.py --max-us 1650     # teto mais alto à mão
 python3 hardware/controle_8bitdo.py --seconds 120     # flag que vai para o runtime
 ```
 
-**A regra que manda: o PCA9685 tem um dono por vez.** Sem corrida, o dono é o controle manual.
-Com corrida, é o runtime, e o programa não escreve nada na placa: dois processos mandando pulsos
-ao mesmo servo e ESC fariam o carro obedecer a quem escreveu por último. A troca está em
+Ao abrir, o programa carrega o modelo, a câmera e o LiDAR (uma vez só) antes de mostrar os
+comandos.
+
+**A regra que manda: quem escreve na placa é um só.** Sem corrida, o controle manual. Com
+corrida, o laço do modelo. Os dois nunca no mesmo quadro. A troca está em
 `src/ai/car/controle_unico.py`.
 
 | Comando | Sem corrida (à mão) | Com corrida |
@@ -217,8 +233,8 @@ ao mesmo servo e ESC fariam o carro obedecer a quem escreveu por último. A troc
 | LT | ré | nada |
 | Back | parada; para andar de novo, soltar os dois gatilhos | para a corrida |
 | Home | parada, como o Back | nada |
-| Start | estaciona o carro (centro e neutro) e lança a corrida | nada |
-| Ctrl+C | estaciona e sai | para a corrida, espera ela sair, estaciona e sai |
+| Start | estaciona o carro (centro e neutro) e começa a corrida | nada |
+| Ctrl+C | estaciona e sai | para a corrida, estaciona e sai |
 
 Quando a corrida acaba, o modo manual volta **parado até os dois gatilhos serem soltos**: um RT
 que ficou apertado durante a corrida não arranca o carro.
@@ -233,8 +249,9 @@ Detalhes do modo manual (lógica em `src/ai/car/manual.py`):
   Era até 1700 µs, o máximo calibrado; no primeiro teste o Rafael achou rápido demais e baixou
   para 1630 (2026-10-14). A IA anda a 1610 fixos. Abaixo de 10% do curso conta como solto.
   `--max-us` muda o teto, até 1700.
-- **Ré (LT):** 1420 µs fixos. Era 1400, como a seta para baixo do teclado; no carro, em
-  2026-10-17, o Rafael pediu 1420.
+- **Ré (LT):** 1380 µs fixos. Quanto mais abaixo do neutro (1500), mais forte a ré. Era 1400,
+  como a seta para baixo do teclado; em 2026-10-17 foi para 1420 e, no mesmo dia, o Rafael pediu
+  1380 para ter mais ré (1420 dava menos que os 1400 de antes).
 
 Proteções:
 
@@ -253,8 +270,8 @@ Proteções:
   falhas. Se elas duram 0,1 s seguidos, o programa sai, tenta o neutro 10 vezes e, se nenhuma
   passar, manda **desligar a chave do carro**: o PCA9685 continua mandando o último pulso
   sozinho. A lógica está em `src/ai/car/escrita_tolerante.py`. **O conserto de verdade é o fio.**
-  O runtime autônomo não tem essa tolerância: lá uma falha encerra a corrida e tenta o neutro.
-- Na corrida, as três regras da seção 6.
+  Na corrida, uma falha encerra a corrida, estaciona o carro e volta ao manual.
+- Na corrida, as regras da seção 6.
 
 O que ele **não** tem: a parada frontal do LiDAR no modo manual. O runtime corta o motor quando
 algo fica a menos de 6 cm à frente; à mão, quem dirige pode bater na parede.
@@ -266,18 +283,21 @@ algo fica a menos de 6 cm à frente; à mão, quem dirige pode bater na parede.
    aqui.** A troca é `SINAL_DO_ANALOGICO` em `src/ai/car/manual.py`.
 3. RT devagar, LT para a ré, e Back com o RT apertado: as rodas param e só voltam depois de
    soltar e apertar o RT de novo.
-4. Com o RT apertado, **Start**: as rodas param na hora (o carro é estacionado) e aparece
-   `CORRIDA LANCADA`. Mexer o analógico e o RT durante o carregamento do modelo não deve fazer
-   nada.
-5. Quando o modelo carregar, as rodas giram pela corrida. **Back**: o runtime imprime
-   `interrompido` e `estado seguro`, e o programa imprime `corrida encerrada`.
-6. Se o RT estiver apertado quando a corrida acabar, as rodas ficam paradas. Soltar e apertar o
-   RT: volta o modo manual.
-7. Start, e **Ctrl+C** no terminal durante a corrida: a corrida para, o carro é estacionado e o
+4. Com o RT apertado, **Start**: aparece `CORRIDA COMECOU` e, uma vez por segundo, uma linha
+   `corrida: fps=...`. As rodas giram **em cerca de 1 s** (a trava de arranque). Mexer o
+   analógico e o RT durante a corrida não deve fazer nada.
+5. **Back**: as rodas param na hora e aparece `corrida parada (Back)`.
+6. Com o RT ainda apertado depois do Back, as rodas ficam paradas. Soltar e apertar o RT: volta
+   o modo manual.
+7. Start de novo: deve largar tão rápido quanto da primeira vez, sem carregar nada.
+8. Start, e **Ctrl+C** no terminal durante a corrida: a corrida para, o carro é estacionado e o
    programa sai.
 
 Testado no PC: `tests/test_car_manual.py`, `tests/test_car_controle_unico.py`,
-`tests/test_car_largada.py`, `tests/test_car_escrita_tolerante.py` e
-`tests/test_controle_8bitdo.py`. Este último roda o programa inteiro com placa, controle e runtime
-de mentira e confere, entre outras coisas, que **nada chega à placa durante a corrida**. **Não
-testado:** os dois modos juntos no carro.
+`tests/test_car_largada.py`, `tests/test_car_escrita_tolerante.py`, `tests/test_car_run_log.py`
+e `tests/test_controle_8bitdo.py`. Este último roda o programa inteiro com placa, controle e
+`jetson_runtime` de mentira e confere, entre outras coisas, que o modelo, a câmera e o LiDAR são
+abertos **uma vez** para várias corridas e que o controle é lido sem esperar durante a corrida.
+Também foi conferido que o `main()` do `jetson_runtime.py` antes e depois da separação das
+funções monta exatamente a mesma corrida. **Não testado:** a corrida dentro do programa no
+carro.

@@ -1,87 +1,133 @@
-"""Um programa so para o controle: dirige a mao e larga a corrida autonoma.
+"""Um programa so para o controle: dirige a mao e roda a corrida autonoma.
 
-Python 3.6-safe. Junta o que eram dois programas (pedido do Rafael em
-2026-10-17): o controle manual (``ai.car.manual``) e a largada da corrida
-autonoma (``ai.car.largada``).
+Python 3.6-safe. Usado pelo ``hardware/controle_8bitdo.py``.
 
-A regra que manda em tudo: o PCA9685 tem UM dono por vez.
+Historia. Ate 2026-10-17 o Start lancava o ``jetson_runtime.py`` como OUTRO
+programa: cada corrida carregava CUDA, camera, LiDAR e modelo do zero (1 a 2
+minutos, nunca cronometrado), e depois do Back o manual so voltava quando
+aquele programa terminava de fechar tudo. A pedido do Rafael ("o objetivo e ser
+algo mais rapido"), a corrida passou a rodar DENTRO do programa do controle:
+modelo, camera e LiDAR sao abertos uma vez, na abertura do programa, e o Start
+so comeca a chamar o laco de direcao do runtime (o mesmo ``DriveLoop``).
 
-  - Sem corrida, o dono e o controle manual: ``passo`` devolve o ``Comando``
-    a escrever.
-  - Start: o carro e estacionado (servo no centro, ESC em neutro) e so entao
-    o runtime e lancado. A partir dai ``passo`` devolve ``None`` -- nada vai
-    para a placa, que passa a ser do runtime. Dois processos escrevendo no
-    mesmo servo e ESC fariam o carro obedecer a quem escreveu por ultimo.
-  - Back com corrida: para a corrida (o mesmo sinal do Ctrl+C). Sem corrida,
-    e a parada do controle manual.
-  - Quando a corrida acaba, o manual volta TRAVADO: parado ate os gatilhos
-    serem soltos. Um RT que ficou apertado durante a corrida nao arranca o carro.
+A regra que manda em tudo: quem escreve na placa e UM so.
 
-Sem Jetson: quem lanca o runtime, quem estaciona o carro e o relogio sao
+  - Sem corrida, o controle manual: ``passo`` devolve o ``Comando`` a escrever.
+  - Start: o carro e estacionado (servo no centro, ESC em neutro) e uma
+    corrida nova comeca. Daí em diante cada ``passo`` e um quadro do modelo, e
+    devolve ``None`` -- quem escreveu na placa foi o laco do modelo.
+  - Back, o limite de tempo ou um erro no laco: o carro e estacionado na hora,
+    o log da corrida e fechado, e o manual volta TRAVADO -- parado ate os
+    gatilhos serem soltos.
+
+Os botoes valem na BORDA (o instante em que foram apertados): quando o controle
+desliga, o adaptador nao zera o ultimo estado, e um Start "preso" largaria uma
+corrida atras da outra.
+
+Sem Jetson: quem cria a corrida, quem estaciona o carro e o relogio sao
 injetados.
 """
 import time
+import traceback
 
-from ai.car.largada import Largada
+from ai.car.gamepad import BACK, START
 
 
 class ControleUnico(object):
-    """Decide, a cada giro do laco, quem manda no carro e o que mandar.
+    """Decide, a cada giro do laco, quem manda no carro.
 
     Args:
-        inicia_runtime: funcao sem argumentos que lanca o jetson_runtime.py e
-            devolve o processo.
+        nova_corrida: funcao sem argumentos que prepara uma corrida e devolve
+            um objeto com ``passo()`` (um quadro do modelo; devolve a
+            telemetria) e ``fecha()`` (fecha o log).
         manual: um ``ai.car.manual.Manual``.
         estaciona: funcao sem argumentos que poe servo no centro e ESC em
-            neutro na placa; devolve ``True`` se conseguiu.
-        avisa: recebe os eventos da corrida (``"largou"``, ``"parando"``,
-            ``"acabou"``, ``"nao_parou"``).
+            neutro; devolve ``True`` se conseguiu.
+        avisa: recebe ``"largou"`` e, quando a corrida acaba, o motivo:
+            ``"parada"`` (Back), ``"tempo"`` ou ``"erro"``.
         relogio: ``time.monotonic``; existe para os testes.
+        limite_s: duracao maxima de uma corrida (o ``--seconds`` do runtime).
     """
 
-    def __init__(self, inicia_runtime, manual, estaciona, avisa=None,
-                 relogio=time.monotonic):
-        self._inicia_runtime = inicia_runtime
+    def __init__(self, nova_corrida, manual, estaciona, avisa=None,
+                 relogio=time.monotonic, limite_s=60.0):
+        self._nova_corrida = nova_corrida
         self._manual = manual
         self._estaciona = estaciona
         self._avisa = avisa or (lambda evento: None)
-        self._largada = Largada(self._lanca, avisa=self._evento, relogio=relogio)
+        self._relogio = relogio
+        self._limite_s = limite_s
+        self._corrida = None
+        self._inicio = None
+        self._antes = 0
+        #: Telemetria do ultimo quadro do modelo, para a tela.
+        self.telemetria = None
+        #: Texto do ultimo erro que encerrou uma corrida.
+        self.erro = None
 
     @property
     def correndo(self):
-        """A placa esta com o runtime."""
-        return self._largada.correndo
+        return self._corrida is not None
 
     def passo(self, estado):
         """Um giro do laco. ``estado`` e o relatorio decodificado, ou ``None``.
 
         Returns:
-            O ``Comando`` para escrever na placa, ou ``None`` se ela e do runtime.
+            O ``Comando`` para escrever na placa, ou ``None`` quando quem
+            mandou neste giro foi o modelo (ou a corrida acabou de parar).
         """
-        self._largada.passo(None if estado is None else estado.botoes)
-        if self._largada.correndo:
+        apertou = 0
+        if estado is not None:
+            apertou = estado.botoes & ~self._antes
+            self._antes = estado.botoes
+
+        if self._corrida is not None:
+            if apertou & BACK:
+                self._termina("parada")
+            elif self._relogio() - self._inicio >= self._limite_s:
+                self._termina("tempo")
+            else:
+                self._quadro()
             return None
+
+        if apertou & START and not apertou & BACK:
+            self._estaciona()
+            self._corrida = self._nova_corrida()
+            self._inicio = self._relogio()
+            self.erro = None
+            self._avisa("largou")
+            self._quadro()
+            return None
+
         self._manual.recebe(estado)
         return self._manual.comando()
 
-    def encerra(self, sinaliza=True):
-        """Para a corrida, se houver, e SO DEPOIS estaciona o carro.
-
-        Mesmo com um runtime que nao respondeu, o carro e estacionado: travado,
-        ele ja nao escreve nada, e o neutro daqui e o que resta.
+    def encerra(self):
+        """Para a corrida, se houver, e estaciona o carro.
 
         Returns:
-            ``True`` se nao sobrou corrida viva e o carro foi estacionado.
+            ``True`` se o carro foi estacionado.
         """
-        sem_corrida = self._largada.encerra(sinaliza=sinaliza)
+        if self._corrida is not None:
+            return self._termina("parada")
+        return self._estaciona()
+
+    def _quadro(self):
+        try:
+            self.telemetria = self._corrida.passo()
+        except Exception:
+            # Erro no laco do modelo (camera, I2C, ...): o programa nao cai, a
+            # corrida para e o carro e estacionado. Ctrl+C nao e Exception e
+            # passa direto.
+            self.erro = traceback.format_exc()
+            self._termina("erro")
+
+    def _termina(self, motivo):
         estacionou = self._estaciona()
-        return sem_corrida and estacionou
-
-    def _lanca(self):
-        self._estaciona()
-        return self._inicia_runtime()
-
-    def _evento(self, evento):
-        if evento == "acabou":
+        corrida, self._corrida = self._corrida, None
+        try:
+            corrida.fecha()
+        finally:
             self._manual.trava()
-        self._avisa(evento)
+            self._avisa(motivo)
+        return estacionou

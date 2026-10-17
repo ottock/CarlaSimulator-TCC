@@ -1,16 +1,17 @@
-"""Um programa so para o controle: dirige a mao e larga a corrida autonoma.
+"""Um programa so para o controle: dirige a mao e roda a corrida autonoma.
 
-A regra que manda em tudo aqui: o PCA9685 tem UM dono por vez. Sem corrida,
-quem escreve nele e o controle manual. Com corrida, e o jetson_runtime.py, e o
-programa do controle nao escreve nada -- dois processos mandando pulsos ao
-mesmo servo e ESC fariam o carro obedecer a quem escreveu por ultimo.
+Desde 2026-10-17 a corrida roda DENTRO do programa do controle: o modelo, a
+camera e o LiDAR sao abertos uma vez, e o Start so comeca a chamar o laco de
+direcao. Assim largar leva o tempo da trava de arranque, e parar e imediato.
+
+A regra continua: quem escreve na placa e UM so. Sem corrida, o controle
+manual; com corrida, o laco do modelo. Os dois nunca no mesmo giro.
 """
-import signal
+import pytest
 
-from ai.car.gamepad import BACK, START, Estado
 from ai.car.controle_unico import ControleUnico
+from ai.car.gamepad import BACK, START, Estado
 from ai.car.manual import Manual
-from test_car_largada import Fabrica, Relogio
 
 NEUTRO = 1500
 
@@ -19,122 +20,210 @@ def _e(ex=0, lt=0, rt=0, botoes=0):
     return Estado(botoes=botoes, lt=lt, rt=rt, ex=ex, ey=0, dx=0, dy=0)
 
 
+class Relogio(object):
+    def __init__(self):
+        self.agora = 100.0
+
+    def __call__(self):
+        return self.agora
+
+
+class Corrida(object):
+    """O laco do modelo para uma corrida: cada ``passo`` e um quadro."""
+
+    def __init__(self, mundo, falha=None):
+        self._mundo = mundo
+        self._falha = falha
+        self.passos = 0
+        self.fechada = False
+
+    def passo(self):
+        self.passos += 1
+        if self._falha is not None:
+            raise self._falha
+        return {"esc_us": 1610, "passo": self.passos}
+
+    def fecha(self):
+        self.fechada = True
+        self._mundo.ordem.append("fecha")
+
+
 class Mundo(object):
     """O que o ControleUnico toca fora dele, anotando a ordem dos acontecimentos."""
 
-    def __init__(self, estaciona_ok=True, **como_a_corrida):
+    def __init__(self, estaciona_ok=True, falha=None):
         self.ordem = []
         self.eventos = []
-        self.fabrica = Fabrica(**como_a_corrida)
+        self.corridas = []
         self._estaciona_ok = estaciona_ok
+        self._falha = falha
 
-    def inicia(self):
+    def nova_corrida(self):
         self.ordem.append("inicia")
-        return self.fabrica()
+        self.corridas.append(Corrida(self, self._falha))
+        return self.corridas[-1]
 
     def estaciona(self):
-        viva = any(c.codigo is None for c in self.fabrica.corridas)
-        self.ordem.append("estaciona com corrida viva" if viva else "estaciona")
+        self.ordem.append("estaciona")
         return self._estaciona_ok
 
 
-def _unico(**como):
-    mundo = Mundo(**como)
-    unico = ControleUnico(mundo.inicia, Manual(max_us=1630, relogio=Relogio()),
+def _unico(limite_s=60.0, **como):
+    mundo, relogio = Mundo(**como), Relogio()
+    unico = ControleUnico(mundo.nova_corrida, Manual(max_us=1630, relogio=relogio),
                           mundo.estaciona, avisa=mundo.eventos.append,
-                          relogio=Relogio())
-    return unico, mundo
+                          relogio=relogio, limite_s=limite_s)
+    return unico, mundo, relogio
+
+
+def _largado(**como):
+    unico, mundo, relogio = _unico(**como)
+    unico.passo(_e(botoes=START))
+    unico.passo(_e())
+    return unico, mundo, relogio
 
 
 # ------------------------------------------------------------- modo manual
 
 def test_without_a_run_the_controller_drives_the_car():
-    unico, _ = _unico()
+    unico, _, _ = _unico()
     assert unico.passo(_e(rt=255)).esc_us == 1630
 
 
 def test_back_without_a_run_is_the_manual_stop():
-    unico, mundo = _unico()
+    unico, mundo, _ = _unico()
     cmd = unico.passo(_e(rt=255, botoes=BACK))
     assert cmd.esc_us == NEUTRO and cmd.motivo == "parado"
-    assert mundo.fabrica.corridas == []
+    assert mundo.corridas == []
 
 
-# ---------------------------------------------------------- corrida autonoma
+# ---------------------------------------------------------------- largar
 
-def test_start_parks_the_car_before_launching_the_run():
-    unico, mundo = _unico()
+def test_start_parks_the_car_before_starting_the_run():
+    unico, mundo, _ = _unico()
     unico.passo(_e(botoes=START))
     assert mundo.ordem == ["estaciona", "inicia"]
+    assert unico.correndo
 
 
-def test_start_while_driving_by_hand_parks_the_car_first():
-    unico, mundo = _unico()
+def test_start_while_driving_by_hand_parks_first_and_writes_nothing():
+    unico, mundo, _ = _unico()
     unico.passo(_e(rt=255))
     assert unico.passo(_e(rt=255, botoes=START)) is None
     assert mundo.ordem == ["estaciona", "inicia"]
 
 
-def test_while_the_run_is_on_nothing_goes_to_the_board():
-    unico, _ = _unico()
+def test_start_and_back_together_do_not_start_a_run():
+    unico, mundo, _ = _unico()
+    unico.passo(_e(botoes=START | BACK))
+    assert mundo.corridas == []
+
+
+# -------------------------------------------------------- durante a corrida
+
+def test_the_first_step_of_the_model_runs_in_the_same_turn_as_start():
+    unico, mundo, _ = _unico()
     unico.passo(_e(botoes=START))
-    assert unico.passo(_e(rt=255, ex=32767)) is None
+    assert mundo.corridas[0].passos == 1
+
+
+def test_during_the_run_every_turn_is_one_step_of_the_model():
+    # Com ou sem relatorio do controle: o modelo nao espera o controle mudar.
+    unico, mundo, _ = _largado()
+    antes = mundo.corridas[0].passos
     assert unico.passo(None) is None
+    assert unico.passo(_e(rt=255, ex=32767)) is None
+    assert mundo.corridas[0].passos == antes + 2
 
 
-def test_back_during_the_run_stops_the_run_and_the_board_stays_with_it():
-    unico, mundo = _unico()
+def test_the_last_step_telemetry_is_kept_for_the_screen():
+    unico, mundo, _ = _largado()
+    assert unico.telemetria == {"esc_us": 1610, "passo": mundo.corridas[0].passos}
+
+
+def test_start_again_during_the_run_does_not_start_another():
+    unico, mundo, _ = _largado()
     unico.passo(_e(botoes=START))
-    unico.passo(_e())
-    assert unico.passo(_e(botoes=BACK)) is None   # ainda limpando: dono e o runtime
-    assert mundo.fabrica.corridas[0].sinais == [signal.SIGINT]
+    assert len(mundo.corridas) == 1
 
 
-def test_when_the_run_ends_the_car_waits_for_the_triggers_to_be_released():
-    unico, mundo = _unico()
-    unico.passo(_e(botoes=START))
+# ----------------------------------------------------------------- parar
+
+def test_back_during_the_run_stops_it_at_once():
+    unico, mundo, _ = _largado()
+    antes = mundo.corridas[0].passos
+    assert unico.passo(_e(botoes=BACK)) is None
+    assert not unico.correndo
+    assert mundo.ordem[-2:] == ["estaciona", "fecha"]   # para o carro, depois fecha o log
+    assert mundo.corridas[0].passos == antes            # nenhum quadro no giro do Back
+
+
+def test_after_the_run_the_car_waits_for_the_triggers_to_be_released():
+    unico, _, _ = _largado()
     unico.passo(_e(rt=255))
-    mundo.fabrica.corridas[0].codigo = 0
+    unico.passo(_e(rt=255, botoes=BACK))
     assert unico.passo(_e(rt=255)).esc_us == NEUTRO
     unico.passo(_e(rt=0))
     assert unico.passo(_e(rt=255)).esc_us == 1630
 
 
-def test_the_operator_hears_about_the_run():
-    unico, mundo = _unico()
+def test_a_start_still_held_after_the_run_does_not_start_another():
+    # O adaptador nao zera o estado quando o controle desliga: vale a borda.
+    unico, mundo, _ = _unico()
     unico.passo(_e(botoes=START))
-    unico.passo(_e())
-    unico.passo(_e(botoes=BACK))
-    mundo.fabrica.corridas[0].codigo = 0
+    unico.passo(_e(botoes=START | BACK))
+    unico.passo(_e(botoes=START))
+    assert len(mundo.corridas) == 1
+
+
+def test_the_run_stops_by_itself_at_the_time_limit():
+    unico, mundo, relogio = _largado(limite_s=60.0)
+    relogio.agora += 61.0
     unico.passo(None)
-    assert mundo.eventos == ["largou", "parando", "acabou"]
+    assert not unico.correndo
+    assert mundo.eventos[-1] == "tempo"
+    assert mundo.ordem[-2:] == ["estaciona", "fecha"]
+
+
+def test_an_error_in_the_model_stops_the_run_and_keeps_the_program():
+    # Ex.: um fio do I2C solto no meio da corrida. Antes, com o runtime num
+    # processo a parte, ele caia sozinho; aqui o programa para a corrida e volta
+    # ao manual em vez de cair inteiro.
+    unico, mundo, _ = _unico(falha=OSError(121, "Remote I/O error"))
+    unico.passo(_e(botoes=START))
+    assert not unico.correndo
+    assert mundo.eventos[-1] == "erro"
+    assert "Remote I/O error" in unico.erro
+    assert mundo.ordem == ["estaciona", "inicia", "estaciona", "fecha"]
+
+
+def test_ctrl_c_during_a_step_is_not_swallowed():
+    unico, _, _ = _unico(falha=KeyboardInterrupt())
+    with pytest.raises(KeyboardInterrupt):
+        unico.passo(_e(botoes=START))
+
+
+def test_the_operator_hears_why_the_run_ended():
+    unico, mundo, _ = _largado()
+    unico.passo(_e(botoes=BACK))
+    assert mundo.eventos == ["largou", "parada"]
 
 
 # ------------------------------------------------------------- encerramento
 
-def test_shutting_down_stops_the_run_before_parking_the_car():
-    # Escrever no PCA9685 com o runtime vivo seria disputar o servo com ele.
-    unico, mundo = _unico()
-    unico.passo(_e(botoes=START))
+def test_shutting_down_stops_the_run_and_parks_the_car():
+    unico, mundo, _ = _largado()
     assert unico.encerra() is True
-    assert mundo.fabrica.corridas[0].sinais == [signal.SIGINT]
-    assert mundo.ordem == ["estaciona", "inicia", "estaciona"]
+    assert mundo.corridas[0].fechada
+    assert mundo.ordem[-2:] == ["estaciona", "fecha"]
 
 
 def test_shutting_down_without_a_run_parks_the_car():
-    unico, mundo = _unico()
+    unico, mundo, _ = _unico()
     assert unico.encerra() is True
     assert mundo.ordem == ["estaciona"]
 
 
-def test_shutting_down_parks_the_car_even_if_the_run_will_not_stop():
-    # Runtime travado: ele ja nao escreve nada, entao o neutro daqui ajuda.
-    unico, mundo = _unico(obedece=False)
-    unico.passo(_e(botoes=START))
-    assert unico.encerra() is False
-    assert mundo.ordem[-1] == "estaciona com corrida viva"
-
-
 def test_shutting_down_says_so_when_the_car_could_not_be_parked():
-    unico, mundo = _unico(estaciona_ok=False)
+    unico, _, _ = _unico(estaciona_ok=False)
     assert unico.encerra() is False

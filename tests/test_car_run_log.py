@@ -11,7 +11,7 @@ import os
 import numpy as np
 import pytest
 
-from ai.car.run_log import RunLogger
+from ai.car.run_log import LogNulo, RunLogger
 
 
 def _read_jsonl(path):
@@ -214,3 +214,18 @@ def test_model_input_is_not_written_when_disabled(tmp_path):
                  control=(0.0, 0.0, 0.0), servo_us=1500, dt=0.05)
     lg.close()
     assert not os.path.exists(os.path.join(str(tmp_path / "r2"), "model_input.npy"))
+
+
+def test_the_null_log_takes_what_the_drive_loop_records_and_writes_nothing(tmp_path, monkeypatch):
+    # O padrao do programa do controle desde 2026-10-17: corrida sem gravacao,
+    # para nao gastar tempo nem disco. Tem de aceitar as MESMAS chamadas que o
+    # DriveLoop faz no RunLogger.
+    monkeypatch.chdir(str(tmp_path))
+    log = LogNulo()
+    log.log_scan(t=0.0, points=[(0.0, 1.0)])
+    log.log_frame(t=0.0, sectors=np.ones(72, dtype=np.float32), control=(0.0, 0.0, 0.0),
+                  servo_us=1500, dt=0.0, frame_bgr=np.zeros((4, 4, 3), dtype=np.uint8),
+                  esc_us=1500, blocked=False, fim=False, model_input=None)
+    log.close()
+    log.close()
+    assert os.listdir(str(tmp_path)) == []
