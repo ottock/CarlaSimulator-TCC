@@ -8,7 +8,7 @@ aqui o volante e o acelerador sao proporcionais.
   - RT: acelerador, de 1600 us (o minimo que move o ESC) ate ``max_us``
     (1700 us, o maximo calibrado). Decisao do Rafael em 2026-10-14: "qualquer
     coisa a gente diminui depois" -- por isso o teto e um parametro;
-  - LT: re, a 1400 us fixos, como a seta para baixo do teclado;
+  - LT: re, a 1420 us fixos (o teclado usa 1400);
   - Back ou Home: parada. O carro so volta a andar depois de os dois gatilhos
     serem soltos. O Home entra porque e apertado antes de o controle desligar.
 
@@ -29,8 +29,9 @@ from ai.car.control_map import (ESC_MAX_US, ESC_MIN_MOVE_US, ESC_NEUTRAL_US,
                                 STEER_CENTER_US, STEER_SPAN_US, steer_to_us)
 from ai.car.gamepad import BACK, HOME
 
-# Re do controle_teste.py, a que ja foi usada no carro pelo teclado.
-ESC_RE_US = 1400
+# Re. Era 1400, a do controle_teste.py (teclado); testando no carro em
+# 2026-10-17 o Rafael pediu 1420.
+ESC_RE_US = 1420
 
 # Abaixo de 10% do curso o gatilho conta como solto: um dedo apoiado nao pode
 # fazer o carro sair andando.

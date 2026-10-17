@@ -233,7 +233,8 @@ Detalhes do modo manual (lógica em `src/ai/car/manual.py`):
   Era até 1700 µs, o máximo calibrado; no primeiro teste o Rafael achou rápido demais e baixou
   para 1630 (2026-10-14). A IA anda a 1610 fixos. Abaixo de 10% do curso conta como solto.
   `--max-us` muda o teto, até 1700.
-- **Ré (LT):** 1400 µs fixos, como a seta para baixo do teclado.
+- **Ré (LT):** 1420 µs fixos. Era 1400, como a seta para baixo do teclado; no carro, em
+  2026-10-17, o Rafael pediu 1420.
 
 Proteções:
 
