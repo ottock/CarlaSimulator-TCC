@@ -288,7 +288,7 @@ MODOS = ("estadio", "eixo", "geral")
 
 def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
                 margin=0.0, min_radius_required=None, modo="estadio", n_points=240,
-                fechado=True):
+                fechado=True, margin_dentro=None):
     """Caminho que o expert deve seguir, com a conferencia que faltava.
 
     ``"eixo"`` devolve a linha de centro -- o comportamento antigo, mantido para
@@ -303,11 +303,18 @@ def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
     eixo da pista, que exige 3,18 m de raio contra os 7,50 m do carro, e isso
     so apareceu meses depois, no asfalto.
 
+    ``margin_dentro`` (2026-10-17) e a folga ate a parede de DENTRO das curvas,
+    so no traçado ``"geral"`` (ver ``ai.tracado_geral``). Os outros modos a
+    recusam: aceitar e ignorar faria uma coleta "com margem de dentro" sair
+    igual a de sempre.
+
     Returns:
         lista de ``(x, y, yaw)``.
     """
     if modo not in MODOS:
         raise ValueError("modo de traçado desconhecido: %r (use %s)" % (modo, list(MODOS)))
+    if margin_dentro is not None and modo != "geral":
+        raise ValueError("margem de dentro so existe no traçado 'geral' (pedido: %r)" % modo)
 
     if modo != "geral" and not fechado:
         raise ValueError("traçado '%s' so existe para laco; pista com fim usa 'geral'" % modo)
@@ -322,7 +329,8 @@ def expert_path(centerline, half_width, vehicle_width, vehicle_length=0.0,
         caminho = [tuple(map(float, linha))
                    for linha in tracado_geral(centerline, fechado, half_width,
                                               vehicle_width, vehicle_length,
-                                              margin, raio_ref=raio_ref)]
+                                              margin, raio_ref=raio_ref,
+                                              margin_dentro=margin_dentro)]
     else:
         caminho = [tuple(map(float, linha))
                    for linha in stadium_path(centerline, half_width, vehicle_width,

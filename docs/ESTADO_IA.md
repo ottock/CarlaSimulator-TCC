@@ -57,6 +57,42 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 >   ao custo de um pouco de reserva de esterço; recoletar no gêmeo calibrado e medir nas corridas
 >   reais (LiDAR do lado de dentro da curva) antes e depois. Hipótese secundária, não medida: o
 >   v5d1 treinou antes da calibração do esterço do gêmeo e pode fechar a curva um pouco demais.
+>   - **2026-10-17 — margem de dentro implementada** em `ai/tracado_geral.py` (`margin_dentro`,
+>     com `folga_por_lado` para medir cada lado) e ligada à coleta (`collect_track.py
+>     --margem-dentro`, só com `--tracado geral`; 0.84 = 7 cm no carro). Com `margin_dentro == margin` a linha é idêntica à de antes (conferido nas 107
+>     pistas da grade). Medido nas 49 pistas que cabem nas peças (os dois sentidos): a linha de hoje
+>     **já passa a ≥ 4,6 cm do lado de dentro** (5,4 cm na montagem do teste real); cada cm a mais
+>     de margem de dentro dá ~1 cm a mais de folga, e o pior caso do esterço vai de **84% (3 cm) a
+>     93% (8 cm)**. Os mesmos 7 cm dos dois lados custam ~4 pontos a mais de esterço.
+>   - **O que os dados do v5d1 mostram** (`dataset_grade_v5`, expert Pure Pursuit, posição de cada
+>     quadro contra o eixo da pista): o piloto passou **bem mais perto que a linha** — mediana de
+>     6,8 cm do lado de dentro nas curvas, mas 5% dos quadros com a carroceria sobre o canto de
+>     dentro (−2,9 cm) e, em 80 de 85 pistas, a menos de 2 cm. É o Pure Pursuit cortando a curva
+>     (já registrado acima: 4,5–7 cm de erro), e o modelo imitou isso. As manobras de recuperação
+>     podem pesar nos extremos (o rótulo de ruído não é confiável), mas a tendência se mantém
+>     filtrando-as. Então a proximidade vem da EXECUÇÃO nos dados, não da margem da linha.
+>   - **Mais margem com o MESMO expert não resolve** (`dataset_grade_v7`, Pure Pursuit + 7 cm de
+>     dentro, gêmeo calibrado): a linha passou a dar ≥ 8,8 cm, mas o expert cortou ainda mais
+>     (mediana 3,9 cm; 5% dos quadros a −2,7 cm; pior −7,1). No gêmeo calibrado o carro é mais
+>     ágil e o Pure Pursuit corta mais. Não foi treinado.
+>   - **✅ v8d1 = seguidor de linha + 7 cm de dentro** (receita do v5d1 trocando o expert:
+>     `dataset_grade_v8` → `driving_grade_v8` → DAgger `dagger_v8_r1` → `driving_grade_v8d1`,
+>     ONNX com paridade 3,3e-7 em `D:/tcc_data/runs/driving_grade_v8d1.onnx`, **ainda fora de
+>     `models/`**). Folga do lado de dentro com o **próprio modelo dirigindo**, as mesmas 112
+>     pistas, no gêmeo calibrado (`D:/tcc_data/medida_folga_{v5d1,v8d1}`):
+>
+>     | | mediana | 5% piores quadros | pior caso | pistas a < 2 cm | montagem do teste real |
+>     |---|---|---|---|---|---|
+>     | v5d1 (feira) | 2,8 cm | −3,3 cm | −7,5 cm | 85 de 87 | −6,8 a −7,3 cm |
+>     | **v8d1** | **9,7 cm** | **+2,4 cm** | **−1,9 cm** | 51 de 87 | −1,9 a +0,2 cm |
+>
+>     Negativo = a carroceria passa por cima do canto de dentro (no sim o canto não bate). Os
+>     números absolutos são do gêmeo, que já errou a ordem dos modelos; vale a diferença (~7 cm na
+>     mediana, ~6 cm no pior caso). Nas 21 pistas de avaliação: **21/21 a 2 m/s e 21/21 a ~2,6 m/s**
+>     (`--velocidade-alvo 2.0` / `3.0`), inclusive SDSSES/SESSDS, onde o v6c batia. Estresse com
+>     acelerador fixo 0,30 (5 m/s nas fechadas, nunca usado antes): v8d1 18/21 (30 colisões, 25 na
+>     SESSDS) contra v5d1 19/21 (2) — perto do limite o v8d1 é um pouco pior. **Falta o teste no
+>     carro real contra o v5d1** (a tag `melhor-v5d1` continua sendo o modelo da feira).
 > - **O gêmeo errou a ordem:** calibrado, ele dava os dois limpos em 21/21 pistas e o v4 como o
 >   mais centralizado. No carro foi o contrário. O simulador serve para descartar o que não
 >   funciona; **quem decide entre candidatos é a pista real**.

@@ -77,7 +77,7 @@ def _lidar_points(obs):
     return np.zeros((0, 3), dtype=np.float32)
 
 
-def _trajeto_do_expert(modo, centerline, track_cfg, margem, fechado=True):
+def _trajeto_do_expert(modo, centerline, track_cfg, margem, fechado=True, margem_dentro=None):
     """Caminho que o Pure Pursuit vai perseguir, ja conferido contra o carro.
 
     O eixo da pista exige raio de 3,18 m e o carro faz 5,64 (0,470 medidos x12).
@@ -88,7 +88,7 @@ def _trajeto_do_expert(modo, centerline, track_cfg, margem, fechado=True):
     caminho = expert_path(centerline, half_width=half,
                           vehicle_width=CAR_WIDTH_M * SCALE,
                           vehicle_length=CAR_LENGTH_M * SCALE,
-                          margin=margem,
+                          margin=margem, margin_dentro=margem_dentro,
                           min_radius_required=CAR_MIN_RADIUS_M * SCALE,
                           modo=modo, fechado=fechado)
     logger.info("Traçado '%s': raio minimo %.2f m (carro faz %.2f) | %d pontos",
@@ -231,7 +231,8 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                   recovery_lat=0.7, recovery_yaw=6.0, recovery_min_speed=1.0, seed=0,
                   tracado="estadio", margem=0.0, recovery_amp=0.2,
                   empurrar=True, fim_m=4.5, pistas_teste=None, dagger=None,
-                  dagger_beta=0.0, lookahead=None, controlador="pp", k_e=2.5):
+                  dagger_beta=0.0, lookahead=None, controlador="pp", k_e=2.5,
+                  margem_dentro=None):
     settings = load_settings(settings_path)
     cc = settings.get("carla_client", {})
     wc = settings.get("world", {})
@@ -259,6 +260,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
         "camera": actor_cfg.get("camera", {}),
         "lidar_sectors": {"n_sectors": LIDAR_N_SECTORS, "max_range_m": LIDAR_MAX_RANGE_M},
         "tracado": tracado, "margem_parede_m": margem,
+        "margem_dentro_m": margem_dentro,
         "recovery_modo": ("ruido+empurrao" if empurrar else "ruido"),
         "recovery_amp": recovery_amp,
         "recovery": ({"every_s": recovery_every, "lat_m": recovery_lat, "yaw_deg": recovery_yaw}
@@ -335,7 +337,7 @@ def collect_track(settings_path, out_dir, pistas, episodes_por_pista=4, seconds=
                 # sempre foi impossivel, e e disso que vinha o subesterco. O eixo
                 # continua servindo para medir desvio -- ele e o meio da faixa.
                 trajeto = _trajeto_do_expert(tracado, centerline, track_cfg, margem,
-                                             fechado=fechado)
+                                             fechado=fechado, margem_dentro=margem_dentro)
 
                 # Nasce no EIXO, nao no traçado: o traçado encosta no limite do
                 # corredor e o CARLA recusa o spawn por colisao com a parede. O
@@ -539,6 +541,10 @@ def main():
                    help="folga extra do traçado ate a parede, em metros de "
                         "simulador. 0 usa o corredor inteiro e o expert raspa: "
                         "o Pure Pursuit erra 0,37 m em media.")
+    p.add_argument("--margem-dentro", type=float, default=None, metavar="M",
+                   help="folga ate a parede de DENTRO das curvas, em metros de "
+                        "simulador (so com --tracado geral). Padrao: igual a "
+                        "--margem. 0.84 = 7 cm no carro (2026-10-17).")
     p.add_argument("--recovery", action="store_true")
     p.add_argument("--recovery-amp", type=float, default=0.2, metavar="A",
                    help="amplitude do ruido de esterco (so com --recovery)")
@@ -581,7 +587,8 @@ def main():
         recovery_yaw=a.recovery_yaw, seed=a.seed, tracado=a.tracado, margem=a.margem,
         recovery_amp=a.recovery_amp, empurrar=not a.sem_empurrao,
         fim_m=a.fim_m, pistas_teste=teste, dagger=a.dagger, dagger_beta=a.dagger_beta,
-        lookahead=a.lookahead, controlador=a.controlador, k_e=a.k_e)
+        lookahead=a.lookahead, controlador=a.controlador, k_e=a.k_e,
+        margem_dentro=a.margem_dentro)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,14 @@ traçado mais a margem -- exatamente como o estadio do v4, que tambem a aplica
 nas retas. Conferido com o retangulo do carro contra as paredes nas 457
 combinacoes da grade: folga minima igual a margem pedida.
 
+Margem do lado de DENTRO (2026-10-17, pedido do Rafael). O v5d1 passa perto da
+parede de dentro da curva: a linha entra por fora, corta por dentro e sai por
+fora, e a folga de dentro e a mesma margem de 3 cm. Mais margem dos dois lados
+aperta as curvas (a pista mais apertada ja usa 84% do esterco); ``margin_dentro``
+poe a folga extra so do lado para onde o EIXO curva, e so onde ele curva. Na
+reta e do lado de fora, vale ``margin``. Com ``margin_dentro == margin`` o
+traçado e exatamente o de antes.
+
 Matematica pura: numpy + scipy, sem ``carla``.
 """
 import math
@@ -143,9 +151,13 @@ class _Corredor:
         return sparse.csr_matrix((val, (lin, col)), shape=(n, n))
 
 
-def _limites_do_passo(cor, a, lim, delta, largada_no_eixo):
-    hi = np.minimum(lim - a, delta)
-    lo = np.maximum(-lim - a, -delta)
+def _limites_do_passo(cor, a, lim_esq, lim_dir, delta, largada_no_eixo):
+    """Limites do passo ``d``: o caminho fica em ``-lim_dir <= a + d <= lim_esq``.
+
+    ``a`` positivo e a ESQUERDA do eixo (a normal do ``_Corredor``).
+    """
+    hi = np.minimum(lim_esq - a, delta)
+    lo = np.maximum(-lim_dir - a, -delta)
     lo = np.minimum(lo, hi)
     if largada_no_eixo:
         # O carro larga parado no meio da faixa, apontado ao longo dela.
@@ -154,18 +166,41 @@ def _limites_do_passo(cor, a, lim, delta, largada_no_eixo):
     return lo, hi
 
 
-def _minimax(cor, folga_fixa, largura_util, comp, larg, kref, delta, largada_no_eixo, iters=80):
+def _extra_de_dentro(cor, extra):
+    """Folga extra por ponto, do lado para onde o eixo curva: ``(esq, dir)``.
+
+    So nos pontos de curva de verdade (mais da metade da maior curvatura do eixo):
+    numa peca de curva a curvatura e constante e na reta e zero, entao o corte
+    separa as pecas sem depender de um valor fixo.
+    """
+    zeros = np.zeros(cor.n)
+    if extra <= 0.0:
+        return zeros, zeros.copy()
+    k = _curvaturas(cor.c, cor.fechado)
+    kmax = float(np.abs(k).max())
+    if kmax <= 0.0:
+        return zeros, zeros.copy()
+    na_curva = np.abs(k) > 0.5 * kmax
+    return (np.where(na_curva & (k > 0), extra, 0.0),
+            np.where(na_curva & (k < 0), extra, 0.0))
+
+
+def _minimax(cor, folga_fixa, largura_util, comp, larg, kref, delta, largada_no_eixo,
+             extra_esq=0.0, extra_dir=0.0, iters=80):
     n = cor.n
     a = np.zeros(n)
 
-    def limite(t):
-        return max(largura_util - folga_fixa - float(sobra(min(t, 1.5) * kref, comp, larg)),
-                   0.01 * largura_util)
+    def limites(t):
+        base = largura_util - folga_fixa - float(sobra(min(t, 1.5) * kref, comp, larg))
+        piso = 0.01 * largura_util
+        return (np.maximum(base - extra_esq, piso) + np.zeros(n),
+                np.maximum(base - extra_dir, piso) + np.zeros(n))
 
     def merito(a):
         k = cor.kappa(a)
         t = float(np.abs(k).max()) / kref
-        viol = max(0.0, float(np.max(np.abs(a))) - limite(t))
+        lim_esq, lim_dir = limites(t)
+        viol = max(0.0, float(np.max(a - lim_esq)), float(np.max(-a - lim_dir)))
         return t + 100.0 * viol / largura_util, k
 
     m_atual, k = merito(a)
@@ -173,7 +208,8 @@ def _minimax(cor, folga_fixa, largura_util, comp, larg, kref, delta, largada_no_
     for _ in range(iters):
         t = float(np.abs(k).max()) / kref
         J = cor.jacobiana(a)
-        lo, hi = _limites_do_passo(cor, a, limite(t), delta, largada_no_eixo)
+        lim_esq, lim_dir = limites(t)
+        lo, hi = _limites_do_passo(cor, a, lim_esq, lim_dir, delta, largada_no_eixo)
         col_t = sparse.csr_matrix(np.full((n, 1), -kref))
         A = sparse.vstack([sparse.hstack([J, col_t]), sparse.hstack([-J, col_t])]).tocsr()
         res = linprog(np.r_[np.zeros(n), 1.0], A_ub=A, b_ub=np.r_[-k, k],
@@ -192,8 +228,13 @@ def _minimax(cor, folga_fixa, largura_util, comp, larg, kref, delta, largada_no_
     return a, k
 
 
-def _suaviza(cor, a, teto, lim, kref, delta, largada_no_eixo, lam_tv=1.0, iters=60):
+def _suaviza(cor, a, teto, lim_esq, lim_dir, kref, delta, largada_no_eixo, lam_tv=1.0,
+             iters=60):
     n = cor.n
+    lim_esq = np.asarray(lim_esq, dtype=float) + np.zeros(n)
+    lim_dir = np.asarray(lim_dir, dtype=float) + np.zeros(n)
+    # Escala das tolerancias: o limite do lado de fora, que e o de antes.
+    lim = float(max(lim_esq.max(), lim_dir.max()))
     p = cor.pontos(a)
     ds = np.hypot(*(np.roll(p, -1, 0) - p).T)
     I_n = sparse.eye(n, format="csr")
@@ -206,7 +247,7 @@ def _suaviza(cor, a, teto, lim, kref, delta, largada_no_eixo, lam_tv=1.0, iters=
 
     def custo(a):
         k = cor.kappa(a)
-        viol = max(0.0, float(np.max(np.abs(a))) - lim)
+        viol = max(0.0, float(np.max(a - lim_esq)), float(np.max(-a - lim_dir)))
         exc = max(0.0, float(np.abs(k).max()) / kref - teto)
         return ((np.sum(np.abs(k) * ds) + lam_tv * np.sum(np.abs(D @ k))) / kref
                 + 1e3 * (viol / lim + exc)), k
@@ -217,7 +258,7 @@ def _suaviza(cor, a, teto, lim, kref, delta, largada_no_eixo, lam_tv=1.0, iters=
     delta_max = 2.0 * delta
     for _ in range(iters):
         J = cor.jacobiana(a)
-        lo, hi = _limites_do_passo(cor, a, lim, delta, largada_no_eixo)
+        lo, hi = _limites_do_passo(cor, a, lim_esq, lim_dir, delta, largada_no_eixo)
         DJ, Dk = (D @ J).tocsr(), D @ k
         A = sparse.vstack([sparse.hstack([J, -I_n, Znm]), sparse.hstack([-J, -I_n, Znm]),
                            sparse.hstack([DJ, Zmn, -I_m]), sparse.hstack([-DJ, Zmn, -I_m])]).tocsr()
@@ -240,7 +281,8 @@ def _suaviza(cor, a, teto, lim, kref, delta, largada_no_eixo, lam_tv=1.0, iters=
 
 
 def tracado_geral(eixo, fechado, half_width, vehicle_width, vehicle_length, margin,
-                  raio_ref, folga_curvatura=0.03, largada_no_eixo=None, passo=None):
+                  raio_ref, folga_curvatura=0.03, largada_no_eixo=None, passo=None,
+                  margin_dentro=None):
     """Caminho de menor curvatura maxima dentro do corredor.
 
     Args:
@@ -258,6 +300,9 @@ def tracado_geral(eixo, fechado, half_width, vehicle_width, vehicle_length, marg
             pista aberta, onde o carro larga parado no meio da faixa.
         passo: espacamento do traçado, em metros. Padrao ``half_width / 12``
             (0,265 m no gemeo, a resolucao do estadio). O eixo e reamostrado.
+        margin_dentro: folga ate a parede de DENTRO nas curvas (o lado para onde
+            o eixo curva). Padrao: igual a ``margin``, o traçado de sempre. Menor
+            que ``margin`` e recusado.
 
     Returns:
         ``np.ndarray (n, 3)`` com ``(x, y, yaw)``, no sentido do eixo recebido,
@@ -266,19 +311,26 @@ def tracado_geral(eixo, fechado, half_width, vehicle_width, vehicle_length, marg
     if largada_no_eixo is None:
         largada_no_eixo = not fechado
     hw, comp, larg = float(half_width), float(vehicle_length), float(vehicle_width)
-    if hw - margin - larg / 2.0 <= 0.0:
+    md = float(margin) if margin_dentro is None else float(margin_dentro)
+    if md < float(margin):
+        raise ValueError("margem de dentro %.2f m menor que a margem %.2f m: nao e o que "
+                         "ela existe para fazer" % (md, margin))
+    if hw - md - larg / 2.0 <= 0.0:
         raise ValueError("corredor util vazio: faixa de %.2f m, carro de %.2f m, margem %.2f m"
-                         % (2 * hw, larg, margin))
+                         % (2 * hw, larg, md))
     kref = 1.0 / float(raio_ref)
     eixo = _reamostra(eixo, float(passo) if passo else hw / 12.0, fechado)
     cor = _Corredor(eixo, fechado)
     if cor.n < 5:
         raise ValueError("eixo com %d pontos: curto demais para otimizar" % cor.n)
     delta0 = 0.15 * hw
-    a, k = _minimax(cor, float(margin), hw, comp, larg, kref, delta0, largada_no_eixo)
+    extra_esq, extra_dir = _extra_de_dentro(cor, md - float(margin))
+    a, k = _minimax(cor, float(margin), hw, comp, larg, kref, delta0, largada_no_eixo,
+                    extra_esq, extra_dir)
     teto = float(np.abs(k).max()) / kref + float(folga_curvatura)
     lim = hw - float(margin) - float(sobra(teto * kref, comp, larg))
-    a, k = _suaviza(cor, a, teto, lim, kref, delta0, largada_no_eixo)
+    a, k = _suaviza(cor, a, teto, lim - extra_esq, lim - extra_dir, kref, delta0,
+                    largada_no_eixo)
     p = cor.pontos(a)
     if fechado:
         tg = np.roll(p, -1, 0) - np.roll(p, 1, 0)
@@ -286,6 +338,80 @@ def tracado_geral(eixo, fechado, half_width, vehicle_width, vehicle_length, marg
         tg = np.gradient(p, axis=0)
     yaw = np.arctan2(tg[:, 1], tg[:, 0])
     return np.c_[p, yaw]
+
+
+def _desvios_com_sinal(caminho, eixo, fechado, half_width, vehicle_width,
+                       vehicle_length, passo=None, ignorar_fim=0.0):
+    """Deslocamento lateral COM SINAL (esquerda positiva) do perimetro do carro.
+
+    Um array por ponto do caminho, ou ``None`` nos pontos ignorados. E o calculo
+    da ``folga_exata``, guardando de que lado do eixo cada ponto do perimetro
+    esta (produto vetorial com o segmento mais proximo).
+    """
+    L, W = float(vehicle_length), float(vehicle_width)
+    passo = passo or W / 8.0
+    xs = np.arange(-L / 2, L / 2 + 1e-9, passo)
+    ys = np.arange(-W / 2, W / 2 + 1e-9, passo)
+    perim = np.vstack([np.c_[xs, np.full_like(xs, W / 2)], np.c_[xs, np.full_like(xs, -W / 2)],
+                       np.c_[np.full_like(ys, -L / 2), ys], np.c_[np.full_like(ys, L / 2), ys]])
+    e = np.asarray(eixo, dtype=float)[:, :2]
+    if fechado and np.allclose(e[0], e[-1], atol=1e-6):
+        e = e[:-1]
+    a, b = (e, np.roll(e, -1, 0)) if fechado else (e[:-1], e[1:])
+    ab = b - a
+    l2 = np.maximum((ab ** 2).sum(1), 1e-18)
+    P = np.asarray(caminho, dtype=float)
+    s = np.r_[0.0, np.cumsum(np.hypot(*np.diff(P[:, :2], axis=0).T))]
+    out = []
+    for i, (x, y, h) in enumerate(P):
+        if not fechado and s[-1] - s[i] < ignorar_fim:
+            out.append(None)
+            continue
+        c, sn = math.cos(h), math.sin(h)
+        q = np.array([x, y]) + perim @ np.array([[c, sn], [-sn, c]])
+        t = ((q[:, None, :] - a[None]) * ab[None]).sum(2) / l2[None]
+        proj = a[None] + np.clip(t, 0, 1)[..., None] * ab[None]
+        d2 = ((q[:, None, :] - proj) ** 2).sum(2)
+        j = d2.argmin(1)
+        idx = np.arange(len(q))
+        lat = np.sqrt(d2[idx, j])
+        v = q - proj[idx, j]
+        lado = np.sign(ab[j, 0] * v[:, 1] - ab[j, 1] * v[:, 0])
+        desvio = lado * lat
+        if not fechado:
+            # Antes do comeco ou depois do fim nao ha parede lateral para medir: a
+            # distancia ate a ponta do eixo seria longitudinal, e acusaria um
+            # carro que so esta largando.
+            tj = t[idx, j]
+            fora = ((j == 0) & (tj < 0)) | ((j == len(a) - 1) & (tj > 1))
+            desvio = desvio[~fora]
+            if not len(desvio):
+                out.append(None)
+                continue
+        out.append(desvio)
+    return out
+
+
+def folga_por_lado(caminho, eixo, fechado, half_width, vehicle_width, vehicle_length,
+                   passo=None, ignorar_fim=0.0):
+    """Folga ate a parede da ESQUERDA e da DIREITA, com o retangulo do carro.
+
+    O mesmo calculo da ``folga_exata``, separado por lado -- e o que mostra se a
+    margem de dentro foi respeitada. ``inf`` nos pontos ignorados.
+
+    Returns:
+        ``(esquerda, direita)``, dois ``np.ndarray`` do tamanho do caminho.
+    """
+    hw = float(half_width)
+    desvios = _desvios_com_sinal(caminho, eixo, fechado, half_width, vehicle_width,
+                                 vehicle_length, passo=passo, ignorar_fim=ignorar_fim)
+    esq = np.full(len(desvios), np.inf)
+    dir_ = np.full(len(desvios), np.inf)
+    for i, d in enumerate(desvios):
+        if d is not None:
+            esq[i] = hw - float(d.max())
+            dir_[i] = hw + float(d.min())
+    return esq, dir_
 
 
 def folga_exata(caminho, eixo, fechado, half_width, vehicle_width, vehicle_length,
@@ -303,39 +429,11 @@ def folga_exata(caminho, eixo, fechado, half_width, vehicle_width, vehicle_lengt
     Returns:
         ``np.ndarray`` com a folga de cada ponto (``inf`` nos ignorados).
     """
-    L, W, hw = float(vehicle_length), float(vehicle_width), float(half_width)
-    passo = passo or W / 8.0
-    xs = np.arange(-L / 2, L / 2 + 1e-9, passo)
-    ys = np.arange(-W / 2, W / 2 + 1e-9, passo)
-    perim = np.vstack([np.c_[xs, np.full_like(xs, W / 2)], np.c_[xs, np.full_like(xs, -W / 2)],
-                       np.c_[np.full_like(ys, -L / 2), ys], np.c_[np.full_like(ys, L / 2), ys]])
-    e = np.asarray(eixo, dtype=float)[:, :2]
-    if fechado and np.allclose(e[0], e[-1], atol=1e-6):
-        e = e[:-1]
-    a, b = (e, np.roll(e, -1, 0)) if fechado else (e[:-1], e[1:])
-    ab = b - a
-    l2 = np.maximum((ab ** 2).sum(1), 1e-18)
-    P = np.asarray(caminho, dtype=float)
-    s = np.r_[0.0, np.cumsum(np.hypot(*np.diff(P[:, :2], axis=0).T))]
-    out = np.full(len(P), np.inf)
-    for i, (x, y, h) in enumerate(P):
-        if not fechado and s[-1] - s[i] < ignorar_fim:
-            continue
-        c, sn = math.cos(h), math.sin(h)
-        q = np.array([x, y]) + perim @ np.array([[c, sn], [-sn, c]])
-        t = ((q[:, None, :] - a[None]) * ab[None]).sum(2) / l2[None]
-        proj = a[None] + np.clip(t, 0, 1)[..., None] * ab[None]
-        d2 = ((q[:, None, :] - proj) ** 2).sum(2)
-        j = d2.argmin(1)
-        lat = np.sqrt(d2[np.arange(len(q)), j])
-        if not fechado:
-            # Antes do comeco ou depois do fim nao ha parede lateral para medir: a
-            # distancia ate a ponta do eixo seria longitudinal, e acusaria um
-            # carro que so esta largando.
-            tj = t[np.arange(len(q)), j]
-            fora = ((j == 0) & (tj < 0)) | ((j == len(a) - 1) & (tj > 1))
-            lat = lat[~fora]
-            if not len(lat):
-                continue
-        out[i] = hw - float(lat.max())
+    hw = float(half_width)
+    desvios = _desvios_com_sinal(caminho, eixo, fechado, half_width, vehicle_width,
+                                 vehicle_length, passo=passo, ignorar_fim=ignorar_fim)
+    out = np.full(len(desvios), np.inf)
+    for i, d in enumerate(desvios):
+        if d is not None:
+            out[i] = hw - float(np.abs(d).max())
     return out
