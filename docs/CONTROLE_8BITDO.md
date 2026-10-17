@@ -245,13 +245,14 @@ Detalhes do modo manual (lógica em `src/ai/car/manual.py`):
   span 300. O modelo usa 350 (1850/1150 µs), e com 300 a curva mais fechada pode não sair à mão;
   o Rafael escolheu começar em 300 para testar (2026-10-14). `--span 350` iguala ao modelo. O
   teclado usa ±260, tudo ou nada.
-- **Acelerador (RT):** proporcional ao curso, de 1600 µs, o mínimo que move o ESC, até 1630 µs.
+- **Acelerador (RT):** proporcional ao curso, de 1600 µs, o mínimo que move o ESC, até 1620 µs.
   Era até 1700 µs, o máximo calibrado; no primeiro teste o Rafael achou rápido demais e baixou
-  para 1630 (2026-10-14). A IA anda a 1610 fixos. Abaixo de 10% do curso conta como solto.
+  para 1630 (2026-10-14) e depois para 1620. A corrida autônoma segue a 1610 fixos. Abaixo de
+  10% do curso conta como solto.
   `--max-us` muda o teto, até 1700.
-- **Ré (LT):** 1380 µs fixos. Quanto mais abaixo do neutro (1500), mais forte a ré. Era 1400,
-  como a seta para baixo do teclado; em 2026-10-17 foi para 1420 e, no mesmo dia, o Rafael pediu
-  1380 para ter mais ré (1420 dava menos que os 1400 de antes).
+- **Ré (LT):** 1390 µs fixos. Quanto mais abaixo do neutro (1500), mais forte a ré. Era 1400,
+  como a seta para baixo do teclado. Ajustada pelo Rafael no carro: 1420 em 2026-10-17 (dava
+  menos ré), 1380 no mesmo dia, e 1390 depois de testar.
 
 Proteções:
 

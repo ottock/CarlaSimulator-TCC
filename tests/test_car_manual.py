@@ -1,7 +1,7 @@
 """Dirigir o carro com o controle 8BitDo: estado do controle -> servo e ESC.
 
 Os numeros esperados vem do carro, nao deste modulo: 1850/1150 us sao os lados
-medidos com span 350 (control_map.py), 1380 e a re que o Rafael pediu no carro
+medidos com span 350 (control_map.py), 1390 e a re que o Rafael pediu no carro
 (2026-10-17), 1600 e o minimo que move o ESC e 1700 o maximo calibrado.
 
 O que estes testes NAO cobrem: o sentido do analogico no carro (direita no
@@ -106,7 +106,7 @@ def test_a_maximum_below_the_moving_threshold_is_refused():
 # --------------------------------------------------------------------- re
 
 def test_lt_held_goes_in_reverse():
-    assert _depois_de(_e(lt=255)).esc_us == 1380
+    assert _depois_de(_e(lt=255)).esc_us == 1390
 
 
 def test_a_finger_resting_on_lt_does_not_reverse():

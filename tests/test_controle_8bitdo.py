@@ -29,7 +29,7 @@ _ARGS = ["--engine", "models/driving_grade_v5d1.onnx"]
 
 # Passos de 12 bits a 50 Hz (us / 4,8828125), calculados a mao.
 CENTRO = NEUTRO = 307     # 1500 us
-ACELERADO = 333           # 1630 us: RT no fundo com o teto padrao
+ACELERADO = 331           # 1620 us: RT no fundo com o teto padrao
 MODELO = (296, 329)       # o laco de mentira manda 1450 us no servo e 1610 no ESC
 SERVO, ESC = 15, 12
 START, BACK = 0x10, 0x20

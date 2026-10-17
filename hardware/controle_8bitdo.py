@@ -18,9 +18,9 @@ COMANDOS
                                       span 300 us para comecar (o modelo usa
                                       350; --span 350 iguala).
   RT                                  acelerador, de 1600 us (o minimo que move)
-                                      ate --max-us (padrao 1630; o maximo
+                                      ate --max-us (padrao 1620; o maximo
                                       calibrado e 1700). Soltou, para.
-  LT                                  re, a 1380 us fixos (o teclado usa 1400).
+  LT                                  re, a 1390 us fixos (o teclado usa 1400).
   Back ou Home                        parada. Para andar de novo, solte os dois
                                       gatilhos e aperte outra vez.
 
@@ -118,10 +118,10 @@ ESC_CHANNEL = 12
 # a mao. Para o mesmo batente do modelo: --span 350.
 SPAN_INICIAL_US = 300
 
-# Teto do acelerador (RT no fundo). Era 1700, o maximo calibrado do ESC; no
-# teste de 2026-10-14 o Rafael achou rapido demais e baixou para 1630. A IA anda
-# a 1610 fixos. Para subir: --max-us, ate 1700.
-MAX_INICIAL_US = 1630
+# Teto do acelerador (RT no fundo). Era 1700, o maximo calibrado do ESC; o
+# Rafael achou rapido demais e baixou para 1630 (2026-10-14) e depois para 1620.
+# A corrida autonoma segue a 1610 fixos. Para subir: --max-us, ate 1700.
+MAX_INICIAL_US = 1620
 
 WATCHDOG_S = 0.25
 # Prazo de cada leitura do controle. A mao, curto o bastante para o laco girar
