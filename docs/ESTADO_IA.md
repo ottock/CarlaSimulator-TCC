@@ -631,7 +631,7 @@ No fim do closed-loop o harness imprime, por rota:
 
 - **Programa do controle 8BitDo com a corrida dentro (2026-10-17): escrito, falta o carro.**
   `hardware/controle_8bitdo.py` dirige à mão (volante no analógico esquerdo, acelerador
-  proporcional no RT até 1620 µs, ré no LT a 1390 µs) e, no Start, roda a corrida do modelo
+  proporcional no RT até 1620 µs, ré no LT a 1380 µs) e, no Start, roda a corrida do modelo
   **dentro do próprio programa**: o modelo, a câmera e o LiDAR são abertos uma vez, quando ele
   abre, e o Start só começa a chamar o `DriveLoop`. O carro anda em ~1 s (a trava de arranque) e
   o Back para na hora. Para isso o `main()` do `jetson_runtime.py` foi dividido em

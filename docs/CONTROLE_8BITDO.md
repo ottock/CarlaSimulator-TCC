@@ -250,9 +250,9 @@ Detalhes do modo manual (lógica em `src/ai/car/manual.py`):
   para 1630 (2026-10-14) e depois para 1620. A corrida autônoma segue a 1610 fixos. Abaixo de
   10% do curso conta como solto.
   `--max-us` muda o teto, até 1700.
-- **Ré (LT):** 1390 µs fixos. Quanto mais abaixo do neutro (1500), mais forte a ré. Era 1400,
+- **Ré (LT):** 1380 µs fixos. Quanto mais abaixo do neutro (1500), mais forte a ré. Era 1400,
   como a seta para baixo do teclado. Ajustada pelo Rafael no carro: 1420 em 2026-10-17 (dava
-  menos ré), 1380 no mesmo dia, e 1390 depois de testar.
+  menos ré), depois 1380, 1390, e de volta a 1380, que ficou.
 
 Proteções:
 

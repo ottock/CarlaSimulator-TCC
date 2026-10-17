@@ -20,7 +20,7 @@ COMANDOS
   RT                                  acelerador, de 1600 us (o minimo que move)
                                       ate --max-us (padrao 1620; o maximo
                                       calibrado e 1700). Soltou, para.
-  LT                                  re, a 1390 us fixos (o teclado usa 1400).
+  LT                                  re, a 1380 us fixos (o teclado usa 1400).
   Back ou Home                        parada. Para andar de novo, solte os dois
                                       gatilhos e aperte outra vez.
 
