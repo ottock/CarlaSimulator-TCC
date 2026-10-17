@@ -82,6 +82,10 @@ class Manual(object):
         self._estado = estado
         self._visto_em = self._relogio()
 
+    def trava(self):
+        """Parado ate os dois gatilhos serem soltos, como depois de um Back."""
+        self._travado = True
+
     def comando(self):
         """Servo e ESC para agora. Chamar a cada giro do laco, haja relatorio ou nao."""
         e = self._estado

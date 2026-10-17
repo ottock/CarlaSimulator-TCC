@@ -11,8 +11,8 @@ import os
 import signal
 import subprocess
 
-from ai.car.gamepad import BACK, START, ControlePerdido
-from ai.car.largada import Largada, comando_da_corrida, laco, pasta_da_corrida
+from ai.car.gamepad import BACK, START
+from ai.car.largada import Largada, comando_da_corrida, pasta_da_corrida
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _RUNTIME = os.path.join(_REPO, "hardware", "jetson_runtime.py")
@@ -165,6 +165,17 @@ def test_back_signals_again_when_the_run_is_still_alive_long_after():
     assert fabrica.corridas[0].sinais == [signal.SIGINT, signal.SIGINT]
 
 
+def test_correndo_tells_whether_a_run_is_in_progress():
+    # Quem divide o PCA9685 com o runtime precisa saber quando nao pode escrever.
+    largada, fabrica, _, _ = _largada()
+    assert largada.correndo is False
+    largada.passo(START)
+    assert largada.correndo is True
+    fabrica.corridas[0].codigo = 0
+    largada.passo(None)
+    assert largada.correndo is False
+
+
 # ------------------------------------------------------- avisos ao operador
 
 def test_the_operator_hears_about_the_launch_the_stop_and_the_end():
@@ -276,47 +287,3 @@ def test_each_run_logs_to_a_folder_named_after_the_model_and_the_time():
     assert pasta_da_corrida("models/driving_grade_v5d1.engine", quando) == \
         "runs/driving_grade_v5d1_2026-10-13_142501"
 
-
-# -------------------------------------------------------------------- laco
-
-_REPOUSO = bytes.fromhex("0014000000000000000000000000101c30640010")
-_COM_START = b"\x00\x14\x10\x00" + _REPOUSO[4:]
-_COM_BACK = b"\x00\x14\x20\x00" + _REPOUSO[4:]
-
-
-class ControleRoteirizado(object):
-    """Entrega relatorios (ou ``None``, ou um erro) na ordem do roteiro."""
-
-    def __init__(self, roteiro):
-        self._roteiro = list(roteiro)
-
-    def le(self, timeout_ms):
-        item = self._roteiro.pop(0)
-        if isinstance(item, BaseException):
-            raise item
-        return item
-
-
-def test_start_then_back_on_the_controller_runs_and_stops_one_run():
-    largada, fabrica, _, _ = _largada()
-    controle = ControleRoteirizado(
-        [_COM_START, _REPOUSO, None, _COM_BACK, ControlePerdido("fim do roteiro")])
-    laco(controle, largada)
-    assert len(fabrica.corridas) == 1
-    assert fabrica.corridas[0].sinais == [signal.SIGINT]
-    assert fabrica.corridas[0].codigo == 0
-
-
-def test_losing_the_adapter_stops_the_run():
-    # Sem adaptador nao ha mais botao de parar: a corrida nao continua sozinha.
-    largada, fabrica, _, _ = _largada()
-    controle = ControleRoteirizado([_COM_START, ControlePerdido("No such device")])
-    assert laco(controle, largada) == "controle perdido"
-    assert fabrica.corridas[0].sinais == [signal.SIGINT]
-
-
-def test_ctrl_c_in_the_terminal_does_not_signal_the_run_a_second_time():
-    largada, fabrica, _, _ = _largada(acaba_sozinha=True)
-    controle = ControleRoteirizado([_COM_START, KeyboardInterrupt()])
-    assert laco(controle, largada) == "interrompido"
-    assert fabrica.corridas[0].sinais == []

@@ -1,7 +1,7 @@
 # Controle 8BitDo no Jetson — o que funciona e o próximo passo
 
-> Estado em **2026-10-13**. Tudo o que está marcado como "visto" foi medido no Jetson do carro
-> nesse dia. O que não foi testado está dito como tal.
+> Começado em **2026-10-13**, atualizado em **2026-10-17**. O que está marcado como "visto" foi
+> medido no Jetson do carro. O que não foi testado está dito como tal.
 
 ## 1. Resumo
 
@@ -10,10 +10,9 @@
 - **Funciona no Jetson**, desde que o programa converse direto com o adaptador pela USB
   (biblioteca `pyusb`). O caminho normal do Linux (`/dev/input/js0`) **não entrega eventos**
   neste kernel; a seção 5 conta por quê.
-- **Largar e parar pelo controle (seção 6):** `hardware/largada_controle.py` inicia a corrida no
-  Start e para no Back. Funciona no carro desde 2026-10-14, rodando sem `sudo`.
-- **Dirigir com o controle (seção 8):** `hardware/controle_8bitdo.py`, volante no analógico e
-  acelerador no RT. Escrito e testado no PC em 2026-10-14; ainda não rodado no Jetson.
+- **O programa do controle (seções 6 e 8):** `hardware/controle_8bitdo.py` dirige o carro à mão
+  e, no Start, larga a corrida autônoma; Back para. Os dois modos funcionaram no carro em
+  programas separados em 2026-10-14. Juntos desde 2026-10-17, **ainda não rodado no Jetson**.
 
 ## 2. Como ler o controle
 
@@ -128,32 +127,19 @@ Fontes: [xpad do kernel 4.9](https://github.com/torvalds/linux/blob/v4.9/drivers
 [manual oficial, ligação por 2.4G](https://manual.8bitdo.com/ultimate-2c-wireless-controller/ultimate-2c-2.4g-windows-2.4g.html),
 [cópia do manual com as luzes](https://teamplush.by/en/product/8bitdo-ultimate-2c/).
 
-## 6. Largar e parar pelo controle
+## 6. Largar e parar a corrida pelo controle
 
-**Estado em 2026-10-14: funcionando no carro.** Rodado no Jetson sem `sudo`, com a regra de
-permissão da seção 7: o Rafael relatou que funcionou perfeitamente.
+**Funcionou no carro em 2026-10-14**, como programa separado (`hardware/largada_controle.py`),
+rodando sem `sudo`. **Desde 2026-10-17 faz parte do `hardware/controle_8bitdo.py`** (seção 8),
+a pedido do Rafael; o programa separado foi removido.
 
-Definido pelo Rafael no mesmo dia: **Start inicia a corrida** e **Back, o botão ao lado do
-Start, para**. Só esses dois botões; não há segundo botão de largada.
-
-```bash
-cd ~/CarlaSimulator-TCC
-python3 hardware/largada_controle.py
-```
+Definido pelo Rafael: **Start inicia a corrida** e **Back, o botão ao lado do Start, para**.
+Não há segundo botão de largada.
 
 "Corrida" é o `hardware/jetson_runtime.py` rodando o modelo, com o comando do topo da seção 2
-de `docs/ESTADO_IA.md`. O script lança esse mesmo comando; ele não mexe no modelo, no esterço
-nem no ESC. Qualquer flag que ele não conhece vai direto para o runtime (por exemplo
-`--seconds 120`).
-
-O que ele faz:
-
-- **Start** lança o runtime, gravando numa pasta nova em `runs/`. Com uma corrida em andamento,
-  Start não faz nada.
-- **Back** manda ao runtime o mesmo sinal do Ctrl+C. O runtime já centraliza o servo e põe o
-  ESC em neutro ao sair.
-- Quando a corrida termina, por Back ou pelo fim do tempo, ele volta a esperar o Start.
-- **Ctrl+C no script, ou o adaptador sumir da USB,** para a corrida e sai.
+de `docs/ESTADO_IA.md`. O programa lança esse mesmo comando; não mexe no modelo, no esterço nem
+no ESC do runtime. Cada corrida grava numa pasta nova em `runs/`, e qualquer flag que o
+programa não conhece vai direto para o runtime (por exemplo `--seconds 120`).
 
 Três regras que estão no código de propósito (`src/ai/car/largada.py`):
 
@@ -163,49 +149,23 @@ Três regras que estão no código de propósito (`src/ai/car/largada.py`):
 2. **Depois de um sinal de parada, outro só sai passados 3 segundos.** Um segundo Ctrl+C pode
    cair dentro da limpeza do runtime e interrompê-la antes de o ESC ir a neutro.
 3. **O runtime nunca é morto à força.** Matar pula a limpeza, e o PCA9685 continua mandando o
-   último pulso: o carro seguiria andando. Se o runtime não responder, o script avisa na tela e
-   o que resta é a chave do carro.
+   último pulso: o carro seguiria andando. Se o runtime não responder, o programa avisa na tela
+   e o que resta é a chave do carro.
 
-O que ele não resolve:
+O que não resolve:
 
 - **O modelo é carregado de novo a cada corrida.** Entre apertar Start e o carro andar passa o
   mesmo tempo de quando o comando é digitado (estimado em 1 a 2 minutos, nunca cronometrado).
   Resolver isso é manter o modelo carregado entre uma corrida e outra, e é outro passo.
 - **No fim da pista o carro para, mas o runtime continua** até acabar o tempo (`--seconds`,
-  padrão 60). É preciso apertar Back antes da próxima largada.
+  padrão 60). É preciso apertar Back antes de largar de novo ou de voltar a dirigir.
 - **Se o controle desligar no meio da corrida, não há Back.** O carro para sozinho no fim da
   pista, na parada frontal ou no fim do tempo.
 
-### Primeiro teste, com as rodas no ar
-
-Antes:
-
-- com `hardware/pad_teste.py`, conferir que Start e o botão ao lado aparecem como `start` e
-  `back`. Se os nomes vierem trocados ou diferentes, não rode o script: avise.
-- criar a regra de permissão da seção 7 e rodar o script **sem `sudo`**. Com `sudo` a corrida
-  não sobe: em 2026-10-14 o runtime, rodando como root, parou no `import pycuda` com
-  `libcurand.so.10: cannot open shared object file`. O `sudo` limpa as variáveis de ambiente,
-  e com elas, muito provavelmente, o `LD_LIBRARY_PATH` que aponta para as bibliotecas do CUDA.
-  Nada se moveu, e o script voltou a esperar o Start normalmente.
-
-Depois, nesta ordem:
-
-1. Apertar Start. Deve aparecer a linha do comando e `CORRIDA LANCADA`, e em seguida a saída
-   normal do runtime. As rodas giram quando o modelo terminar de carregar.
-2. Apertar Start de novo com a corrida em andamento. Não deve acontecer nada.
-3. Apertar Back. O runtime deve imprimir `interrompido` e `estado seguro`, as rodas param e o
-   script imprime `corrida encerrada`.
-4. Start outra vez, e Back **durante o carregamento** do modelo. A corrida deve encerrar sem as
-   rodas terem girado. Nesse caso o runtime mostra um erro `KeyboardInterrupt` na tela em vez de
-   `estado seguro`; é esperado, porque ele foi interrompido antes de chegar ao laço.
-5. Start, esperar as rodas girarem, e apertar Back duas vezes seguidas. As rodas devem parar
-   igual.
-6. Start, e Ctrl+C no terminal do script. As rodas param e o script sai.
-
-O que foi testado sem o carro: a decodificação dos botões contra relatórios reais do adaptador,
-as três regras acima e o caminho completo Start, Back, fim (`tests/test_car_gamepad.py` e
-`tests/test_car_largada.py`), com um adaptador e um runtime de mentira. **Não foi testado:** o
-sinal de verdade chegando ao runtime, e as posições de Start e Back no relatório.
+**Não rode com `sudo`.** Em 2026-10-14, com `sudo`, o runtime parou no `import pycuda` com
+`libcurand.so.10: cannot open shared object file`: o `sudo` limpa as variáveis de ambiente e,
+muito provavelmente, o `LD_LIBRARY_PATH` que aponta para as bibliotecas do CUDA. O programa
+recusa rodar como root. Ler o adaptador sem `sudo` exige a regra de permissão da seção 7.
 
 ## 7. Detalhes a mais (pendências, sem prioridade agora)
 
@@ -222,8 +182,8 @@ sinal de verdade chegando ao runtime, e as posições de Start e Back no relató
   direito e o sentido dos eixos.
 - **Religar o controle depois de desligado:** os dados voltam sem reenviar os dois comandos? Só
   testamos a volta depois do silêncio normal.
-- **Rodar sem `sudo`** (é o que evita a corrida rodar como root no script da seção 6). A regra
-  abaixo foi sugerida e não confirmada. Depois de criá-la, é preciso tirar e recolocar o adaptador.
+- **Regra de permissão para rodar sem `sudo`** (obrigatória: o programa recusa `sudo`, seção 6).
+  Em uso no Jetson desde 2026-10-14. Depois de criá-la, é preciso tirar e recolocar o adaptador.
   ```bash
   echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="2dc8", ATTR{idProduct}=="310a", MODE="0666"' | sudo tee /etc/udev/rules.d/99-8bitdo.rules
   sudo udevadm control --reload
@@ -233,58 +193,90 @@ sinal de verdade chegando ao runtime, e as posições de Start e Back no relató
 - **Descobrir qual dos dois comandos destrava o envio** (seção 5).
 - **Bateria do controle:** o fabricante informa 19 horas em 2.4G e 2 horas de carga. Não medido.
 
-## 8. Dirigir com o controle
+## 8. O programa do controle: dirigir à mão e largar a corrida
 
-**Estado em 2026-10-14: escrito e testado no PC; ainda NÃO rodado no Jetson.** O primeiro uso é
-com as rodas no ar.
-
-`hardware/controle_8bitdo.py` é o `controle_teste.py` com o controle no lugar do teclado. Volante
-e acelerador são proporcionais, por decisão do Rafael em 2026-10-14. Roda só no terminal, sem
-monitor no carro, e sem `sudo`.
+**Estado em 2026-10-17:** os dois modos funcionaram no carro em programas separados
+(2026-10-14). **Juntos, no `hardware/controle_8bitdo.py`, ainda não rodaram no Jetson**: o
+primeiro uso é com as rodas no ar. Roda só no terminal, sem monitor no carro, e **sem `sudo`**.
 
 ```bash
 python3 hardware/controle_8bitdo.py
-python3 hardware/controle_8bitdo.py --max-us 1650     # teto mais alto
+python3 hardware/controle_8bitdo.py --max-us 1650     # teto mais alto à mão
+python3 hardware/controle_8bitdo.py --seconds 120     # flag que vai para o runtime
 ```
 
-| Comando | O que faz |
-|---|---|
-| Analógico esquerdo, para os lados | Volante proporcional. Centro 1500 µs; batentes 1800 µs (esquerda) e 1200 µs (direita), span 300. O modelo usa 350 (1850/1150 µs), e com 300 a curva mais fechada pode não sair à mão; o Rafael escolheu começar em 300 para testar (2026-10-14). `--span 350` iguala ao modelo. O teclado usa ±260, tudo ou nada. |
-| RT | Acelerador proporcional ao curso: de 1600 µs, o mínimo que move o ESC, até 1630 µs. Era até 1700 µs, o máximo calibrado; no primeiro teste o Rafael achou rápido demais e baixou para 1630 (2026-10-14). A IA anda a 1610 fixos. Abaixo de 10% do curso conta como solto. `--max-us` muda o teto, até 1700. |
-| LT | Ré, a 1400 µs fixos, como a seta para baixo do teclado. |
-| Back ou Home | Parada. Para andar de novo, é preciso soltar os dois gatilhos. |
-| Ctrl+C | Servo no centro, ESC em neutro, e sai. |
+**A regra que manda: o PCA9685 tem um dono por vez.** Sem corrida, o dono é o controle manual.
+Com corrida, é o runtime, e o programa não escreve nada na placa: dois processos mandando pulsos
+ao mesmo servo e ESC fariam o carro obedecer a quem escreveu por último. A troca está em
+`src/ai/car/controle_unico.py`.
 
-A lógica está em `src/ai/car/manual.py`. Proteções:
+| Comando | Sem corrida (à mão) | Com corrida |
+|---|---|---|
+| Analógico esquerdo | volante | nada: quem dirige é o modelo |
+| RT | acelerador | nada |
+| LT | ré | nada |
+| Back | parada; para andar de novo, soltar os dois gatilhos | para a corrida |
+| Home | parada, como o Back | nada |
+| Start | estaciona o carro (centro e neutro) e lança a corrida | nada |
+| Ctrl+C | estaciona e sai | para a corrida, espera ela sair, estaciona e sai |
 
-- `ESC_ARMADO` no arquivo, como no `controle_teste.py` (`True`: o carro anda).
+Quando a corrida acaba, o modo manual volta **parado até os dois gatilhos serem soltos**: um RT
+que ficou apertado durante a corrida não arranca o carro.
+
+Detalhes do modo manual (lógica em `src/ai/car/manual.py`):
+
+- **Volante:** proporcional. Centro 1500 µs; batentes 1800 µs (esquerda) e 1200 µs (direita),
+  span 300. O modelo usa 350 (1850/1150 µs), e com 300 a curva mais fechada pode não sair à mão;
+  o Rafael escolheu começar em 300 para testar (2026-10-14). `--span 350` iguala ao modelo. O
+  teclado usa ±260, tudo ou nada.
+- **Acelerador (RT):** proporcional ao curso, de 1600 µs, o mínimo que move o ESC, até 1630 µs.
+  Era até 1700 µs, o máximo calibrado; no primeiro teste o Rafael achou rápido demais e baixou
+  para 1630 (2026-10-14). A IA anda a 1610 fixos. Abaixo de 10% do curso conta como solto.
+  `--max-us` muda o teto, até 1700.
+- **Ré (LT):** 1400 µs fixos, como a seta para baixo do teclado.
+
+Proteções:
+
+- `ESC_ARMADO` no arquivo, como no `controle_teste.py` (`True`: o carro anda à mão). A corrida
+  segue o `ESC_ARMADO` do `jetson_runtime.py`.
 - Laço travado por mais de 0,25 s: ESC em neutro naquele quadro.
-- **Silêncio:** com o carro andando, 0,5 s sem relatório do controle param o carro, e ele volta
-  no relatório seguinte. Existe porque o adaptador não avisa quando o controle desliga (seção 4).
+- **Silêncio:** andando à mão, 0,5 s sem relatório do controle param o carro, e ele volta no
+  relatório seguinte. Existe porque o adaptador não avisa quando o controle desliga (seção 4).
   O preço: segurar o RT no fundo com o analógico parado também é silêncio e pode parar o carro
   numa reta. O tempo muda com `--silencio-s`.
-- Adaptador sumiu da USB: para e sai. Saída sempre com servo no centro e ESC em neutro.
+- Adaptador sumiu da USB: para a corrida, se houver, estaciona e sai.
+- **Fio do I2C que solta por um instante.** Visto em 2026-10-14: no meio da direção um jumper
+  soltou, uma escrita no PCA9685 falhou com `Errno 121, Remote I/O error` e a primeira versão
+  caiu; a escrita seguinte, a do estado seguro, já passou. Agora uma falha isolada não derruba
+  o programa: o comando vai de novo no quadro seguinte, e a tela mostra `I2C FALHOU` e conta as
+  falhas. Se elas duram 0,1 s seguidos, o programa sai, tenta o neutro 10 vezes e, se nenhuma
+  passar, manda **desligar a chave do carro**: o PCA9685 continua mandando o último pulso
+  sozinho. A lógica está em `src/ai/car/escrita_tolerante.py`. **O conserto de verdade é o fio.**
+  O runtime autônomo não tem essa tolerância: lá uma falha encerra a corrida e tenta o neutro.
+- Na corrida, as três regras da seção 6.
 
-O que ele **não** tem: a parada frontal do LiDAR. O runtime corta o motor quando algo fica a
-menos de 6 cm à frente; aqui, quem dirige pode bater na parede na velocidade que estiver
-mandando.
+O que ele **não** tem: a parada frontal do LiDAR no modo manual. O runtime corta o motor quando
+algo fica a menos de 6 cm à frente; à mão, quem dirige pode bater na parede.
 
 ### Primeiro teste, com as rodas no ar
 
 1. `python3 hardware/controle_8bitdo.py`. Ele põe o ESC em neutro por 2 s antes de liberar.
-2. Analógico para a direita: as rodas devem ir para a direita. **Se forem ao contrário, pare
+2. À mão: analógico para a direita vira as rodas para a direita. **Se virar ao contrário, pare
    aqui.** A troca é `SINAL_DO_ANALOGICO` em `src/ai/car/manual.py`.
-3. RT devagar: as rodas começam a girar perto de 10% do curso e aceleram até o fundo.
-4. LT: ré.
-5. Com o RT apertado, Back: as rodas param e continuam paradas enquanto o RT segue apertado.
-   Soltar e apertar o RT de novo: voltam a girar.
-6. RT no fundo e o analógico parado por alguns segundos. Se aparecer `SEM NOTICIAS DO CONTROLE`
-   e as rodas pararem sozinhas, é a parada por silêncio disparando com a mão parada. Anote:
-   é o dado para escolher o `--silencio-s`.
-7. Com o RT apertado, desligar o controle (segurar o Home): as rodas param.
-8. Ctrl+C: servo no centro, ESC em neutro, e o programa sai.
+3. RT devagar, LT para a ré, e Back com o RT apertado: as rodas param e só voltam depois de
+   soltar e apertar o RT de novo.
+4. Com o RT apertado, **Start**: as rodas param na hora (o carro é estacionado) e aparece
+   `CORRIDA LANCADA`. Mexer o analógico e o RT durante o carregamento do modelo não deve fazer
+   nada.
+5. Quando o modelo carregar, as rodas giram pela corrida. **Back**: o runtime imprime
+   `interrompido` e `estado seguro`, e o programa imprime `corrida encerrada`.
+6. Se o RT estiver apertado quando a corrida acabar, as rodas ficam paradas. Soltar e apertar o
+   RT: volta o modo manual.
+7. Start, e **Ctrl+C** no terminal durante a corrida: a corrida para, o carro é estacionado e o
+   programa sai.
 
-Testado no PC (`tests/test_car_manual.py` e um ensaio do programa inteiro com PCA9685 e
-adaptador de mentira): volante, acelerador, ré, parada por Back/Home e por silêncio, e a saída
-em estado seguro. **Não testado:** o sentido do analógico no carro, a ré no ESC de verdade e a
-parada por silêncio com o controle real.
+Testado no PC: `tests/test_car_manual.py`, `tests/test_car_controle_unico.py`,
+`tests/test_car_largada.py`, `tests/test_car_escrita_tolerante.py` e
+`tests/test_controle_8bitdo.py`. Este último roda o programa inteiro com placa, controle e runtime
+de mentira e confere, entre outras coisas, que **nada chega à placa durante a corrida**. **Não
+testado:** os dois modos juntos no carro.

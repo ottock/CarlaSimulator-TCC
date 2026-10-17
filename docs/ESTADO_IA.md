@@ -629,15 +629,14 @@ No fim do closed-loop o harness imprime, por rota:
 
 ## 7. Próximos passos
 
-- **Largada pelo controle: FUNCIONANDO no carro (2026-10-14).**
-  `hardware/largada_controle.py` inicia o `hardware/jetson_runtime.py` quando se aperta Start no
-  controle 8BitDo e o interrompe no Back, o botão ao lado. Roda **sem `sudo`** (com `sudo` a
-  corrida não acha as bibliotecas do CUDA). O controle é lido direto pela USB. Tudo o que foi
-  descoberto e as pendências estão em `docs/CONTROLE_8BITDO.md`.
-- **Dirigir com o controle: escrito, falta o carro (2026-10-14).** `hardware/controle_8bitdo.py`
-  é o `controle_teste.py` com o controle 8BitDo: volante no analógico esquerdo, acelerador
-  proporcional no RT (1600–1700 µs), ré no LT. Testado no PC; o primeiro uso no Jetson é com as
-  rodas no ar (roteiro na seção 8 de `docs/CONTROLE_8BITDO.md`).
+- **Programa único do controle 8BitDo (2026-10-17): escrito, falta o carro.**
+  `hardware/controle_8bitdo.py` dirige à mão (volante no analógico esquerdo, acelerador
+  proporcional no RT até 1630 µs, ré no LT) e, no Start, estaciona o carro e lança o
+  `hardware/jetson_runtime.py`; Back para a corrida. Durante a corrida o programa não escreve no
+  PCA9685. Os dois modos funcionaram no carro em programas separados (2026-10-14); juntos,
+  testados só no PC. Roda **sem `sudo`** (com `sudo` a corrida não acha as bibliotecas do CUDA).
+  O que foi descoberto, o roteiro do primeiro teste e as pendências estão em
+  `docs/CONTROLE_8BITDO.md`.
 
 - **Cruzamento (§5.3): DECIDIDO — aceito.** Não vamos resolver a ambiguidade de
   cruzamento no Town; a pista custom 1:12 é fechada e não tem cruzamentos.

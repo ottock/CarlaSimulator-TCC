@@ -151,6 +151,18 @@ def test_after_back_reverse_also_needs_the_triggers_released_first():
     assert m.comando().esc_us == NEUTRO
 
 
+def test_trava_holds_the_car_until_the_triggers_are_released():
+    # Usado quando a corrida autonoma acaba: um RT que ficou apertado nao
+    # pode arrancar o carro no instante em que o manual volta.
+    m, _ = _manual()
+    m.recebe(_e(rt=255))
+    m.trava()
+    assert m.comando().esc_us == NEUTRO
+    m.recebe(_e(rt=0))
+    m.recebe(_e(rt=255))
+    assert m.comando().esc_us == 1700
+
+
 # --------------------------------------------------- controle que some (silencio)
 
 def test_a_silent_controller_with_rt_held_stops_the_car():

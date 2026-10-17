@@ -19,15 +19,18 @@ As tres regras que nao sao obvias, e por que:
      o ultimo pulso sozinho: o carro seguiria andando. Se o runtime nao
      responde, o que resta e avisar e desligar a chave do carro.
 
-Sem Jetson: ``Largada`` recebe quem lanca o processo e ``laco`` recebe o
-controle, entao tudo aqui e testavel com substitutos.
+O laco que le o controle e divide a placa com o runtime fica em
+``ai.car.controle_unico``, usado pelo ``hardware/controle_8bitdo.py``.
+
+Sem Jetson: ``Largada`` recebe quem lanca o processo, entao e testavel com
+substitutos.
 """
 import os
 import signal
 import subprocess
 import time
 
-from ai.car.gamepad import BACK, START, ControlePerdido, botoes as _botoes
+from ai.car.gamepad import BACK, START
 
 # Tempo depois de um sinal em que outro nao e mandado. A limpeza do runtime
 # (ESC em neutro, fechar log, camera e LiDAR) leva bem menos que isso.
@@ -52,6 +55,11 @@ class Largada(object):
         self._corrida = None
         self._antes = 0
         self._sinal_em = None
+
+    @property
+    def correndo(self):
+        """Ha uma corrida lancada que ainda nao terminou (visto no ultimo ``passo``)."""
+        return self._corrida is not None
 
     def passo(self, botoes=None):
         """Um giro do laco. ``botoes`` e a mascara nova, ou ``None`` se o
@@ -132,23 +140,3 @@ def pasta_da_corrida(engine, quando):
     modelo = os.path.splitext(os.path.basename(engine))[0]
     return "runs/{0}_{1}".format(modelo, quando.strftime("%Y-%m-%d_%H%M%S"))
 
-
-def laco(controle, largada, timeout_ms=100):
-    """Le o controle e alimenta a ``Largada`` ate Ctrl+C ou ate perder o adaptador.
-
-    Nos dois casos a corrida em andamento e parada antes de voltar. Perder o
-    adaptador e perder o botao de parar; a corrida nao continua sem ele.
-
-    Returns:
-        ``"interrompido"`` ou ``"controle perdido"``.
-    """
-    try:
-        while True:
-            relatorio = controle.le(timeout_ms)
-            largada.passo(None if relatorio is None else _botoes(relatorio))
-    except KeyboardInterrupt:
-        largada.encerra(sinaliza=False)
-        return "interrompido"
-    except ControlePerdido:
-        largada.encerra(sinaliza=True)
-        return "controle perdido"
