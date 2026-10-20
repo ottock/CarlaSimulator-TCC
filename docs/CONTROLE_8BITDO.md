@@ -70,7 +70,7 @@ dizer que a posição vem do padrão, mas ainda não apertamos esse comando olha
 |---|---|---|
 | 0–1 | `00 14` (tipo e tamanho) | visto |
 | 2 | bits 0–3: direcional (cima, baixo, esquerda, direita); bit 4: Start; bit 5: Back; bits 6–7: L3, R3 | Start e Back vistos (2026-10-14: o script larga e para a corrida no carro); o resto a conferir |
-| 3 | bits 0–1: LB, RB; bit 2: Home; bits 4–7: A, B, X, Y | Home visto; o resto a conferir |
+| 3 | bits 0–1: LB, RB; bit 2: Home; bits 4–7: A, B, X, Y | Home visto; o resto a conferir (LB + RB desligam o Jetson desde 2026-10-20: o primeiro uso confere os dois) |
 | 4, 5 | gatilhos LT e RT, de 0 a 255 | a conferir |
 | 6–7, 8–9 | analógico esquerdo, lado e vertical (inteiro de 16 bits, byte baixo primeiro) | visto: vai de −1,00 a +1,00 e volta a 0 exato quando solto |
 | 10–11, 12–13 | analógico direito, lado e vertical | a conferir |
@@ -367,8 +367,56 @@ mão). Não aperte Start antes de as rodas responderem.
 
 Se o 4 ou o 5 falharem, o controle precisa dos comandos de abertura de novo. O contorno, até
 mudar o código, é reiniciar o programa com o controle já ligado: `sudo systemctl restart
-carro-controle`, ou desligar e religar o Jetson.
+carro-controle`, ou desligar e religar o Jetson (pelo LB + RB, abaixo).
 
-Testado no PC: `tests/test_servico_carro.py` (o serviço gerado e os comandos de instalar e
-remover, com sudo e systemctl de mentira) e, em `tests/test_controle_8bitdo.py`, a mensagem do
-adaptador ocupado.
+### Desligar pelo controle: LB + RB por 3 s
+
+**Não tire a bateria do Jetson com ele ligado.** Já aconteceu uma vez (a bateria acabou com o
+carro ligado): o Jetson não ligou mais e foi preciso consertar o sistema de arquivos à mão
+(`docs/BRIEFING_APRESENTACAO.md`). Na feira isso aconteceria a cada troca de bateria.
+
+**Decisão do Rafael em 2026-10-20:** desligar pelo controle. Com o carro fora de corrida,
+segure **LB + RB juntos por 3 s**. O programa estaciona o carro, **vira as rodas para os dois
+lados, duas vezes** (o aviso), e manda o Jetson desligar (`sudo /sbin/shutdown -h now`).
+
+A ordem para desligar o carro:
+
+1. Back (carro parado) e a **chave do motor desligada**.
+2. LB + RB por 3 s. As rodas mexem.
+3. Espere o Jetson terminar de desligar. **Quanto tempo leva ainda não foi medido** (abaixo).
+4. Só então tire a bateria do Jetson.
+
+Regras do programa (`src/ai/car/desligamento.py` e `hardware/controle_8bitdo.py`):
+
+- **Durante a corrida, não faz nada.** O aperto tem que começar fora de corrida: segurar os dois
+  na corrida e continuar depois dela não desliga até soltar e apertar de novo.
+- **Rodas mexendo quer dizer "está desligando".** O programa confere antes se o sudo deixa
+  desligar sem senha (`sudo -n -l`); se não deixa, as rodas não mexem e nada acontece. A falta da
+  regra aparece na abertura do programa: `desligar INDISPONIVEL`.
+- Depois do comando, o programa ignora o Ctrl+C (que é como o sistema para o serviço) para a
+  saída segura ir até o fim, e sai sem ser reaberto.
+- Se o comando falhar mesmo assim, aparece `O COMANDO DE DESLIGAR FALHOU` e o programa segue
+  funcionando. Sem monitor ninguém vê essa mensagem; por isso a conferência antes de mexer as
+  rodas.
+
+A permissão: o `servico_carro.py instala` grava `/etc/sudoers.d/carro-desligar`, que libera
+**só** o `/sbin/shutdown -h now`, sem senha, para o seu usuário. Uma regra quebrada pode
+inutilizar o sudo, então ela é gravada primeiro com um nome com ponto (o sudo ignora esses
+arquivos), conferida pelo `visudo` e só então renomeada. O `remove` apaga a regra junto com o
+serviço.
+
+**Testes, com monitor, uma vez antes da feira:**
+
+6. Na abertura do programa **não** pode aparecer `desligar INDISPONIVEL`.
+7. Fora de corrida, segure LB + RB: as rodas viram para os dois lados e o Jetson desliga. Se
+   nada acontecer, LB e RB podem não estar nos bits 8 e 9 (ainda não vistos no carro,
+   seção 3): rode o `hardware/pad_teste.py` apertando os dois.
+8. **Cronometre** do aviso das rodas até a tela apagar. Esse tempo, com folga, é a espera do
+   passo 3 na feira.
+9. Durante uma corrida, segure LB + RB: não deve acontecer nada além da corrida.
+
+Testado no PC: `tests/test_servico_carro.py` (o serviço gerado, a regra do sudo e os comandos
+de instalar e remover, com sudo e systemctl de mentira), `tests/test_car_desligamento.py` (o
+segurar LB + RB) e, em `tests/test_controle_8bitdo.py`, o programa inteiro desligando, sem a
+regra, durante a corrida e com o comando falhando, além da mensagem do adaptador ocupado. **Não
+testado no Jetson.**

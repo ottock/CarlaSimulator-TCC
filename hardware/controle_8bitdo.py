@@ -30,6 +30,13 @@ COMANDOS
                                       sensores em dia).
   Back, com corrida                   para na hora e volta ao manual, parado
                                       ate os gatilhos serem soltos.
+  LB + RB juntos por 3 s, sem corrida estaciona, vira as rodas para os dois
+                                      lados (o aviso) e DESLIGA O JETSON. So
+                                      tire a bateria depois que ele terminar
+                                      de desligar. Precisa da regra do sudo
+                                      que o hardware/servico_carro.py instala;
+                                      sem ela, as rodas nao mexem e nada
+                                      acontece.
   Ctrl+C no terminal                  para a corrida, se houver, estaciona o
                                       carro e sai.
 
@@ -89,6 +96,8 @@ import argparse
 import datetime
 import errno
 import os
+import signal
+import subprocess
 import sys
 import time
 import types
@@ -99,6 +108,7 @@ sys.path.insert(0, os.path.join(_REPO, "src"))
 from ai.car.control_map import (ESC_MAX_US, ESC_NEUTRAL_US, STEER_CENTER_US,
                                 STEER_SPAN_US, FrameWatchdog)
 from ai.car.controle_unico import ControleUnico
+from ai.car.desligamento import SEGURAR_S, SegurarParaDesligar
 from ai.car.escrita_tolerante import EscritaTolerante, PCA9685Perdido, para_com_insistencia
 from ai.car.gamepad import Controle, ControlePerdido, acha_adaptador, estado
 from ai.car.largada import argumentos_da_corrida, pasta_da_corrida
@@ -142,6 +152,14 @@ _AVISOS = {
     "silencio": "SEM NOTICIAS DO CONTROLE: parado ate chegar relatorio novo",
 }
 
+# Desligar o Jetson pelo controle (LB + RB). Mesmo comando da regra do sudo que
+# o hardware/servico_carro.py instala; o sudo confere os argumentos.
+DESLIGA_S = SEGURAR_S
+COMANDO_DESLIGAR = ["/sbin/shutdown", "-h", "now"]
+AVISO_RODAS_S = 0.3
+_SEM_REGRA = ("LB + RB: desligar INDISPONIVEL -- o sudo pede senha. Instale a regra: "
+              "python3 hardware/servico_carro.py instala")
+
 _FALAS = {
     "largou": "=== CORRIDA COMECOU. Back para. ===",
     "parada": "=== corrida parada (Back). Modo manual: solte os gatilhos para andar. ===",
@@ -173,6 +191,31 @@ class Atuadores(object):
     def solta(self):
         self._pwm.set_pwm(SERVO_CHANNEL, 0, 0)
         self._pwm.set_pwm(ESC_CHANNEL, 0, 0)
+
+
+def pode_desligar():
+    """``True`` se o sudo deixa desligar sem senha (``sudo -n -l`` nao pergunta)."""
+    try:
+        return subprocess.call(["sudo", "-n", "-l"] + COMANDO_DESLIGAR,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+    except OSError:
+        return False
+
+
+def desliga_o_jetson():
+    """Manda o Jetson desligar. ``True`` se o comando foi aceito."""
+    try:
+        return subprocess.call(["sudo", "-n"] + COMANDO_DESLIGAR) == 0
+    except OSError:
+        return False
+
+
+def avisa_com_as_rodas(manda, span_us):
+    """Vira as rodas para os dois lados, duas vezes, com o ESC em neutro: o
+    sinal, sem monitor, de que o Jetson vai desligar."""
+    for lado in (-1, 1, -1, 1, 0):
+        manda(STEER_CENTER_US + lado * span_us, ESC_NEUTRAL_US)
+        time.sleep(AVISO_RODAS_S)
 
 
 def carrega_corrida(a, extras):
@@ -330,6 +373,10 @@ def main(argv=None):
     print("A MAO: analogico esquerdo = volante (span {0} us) | RT = acelera 1600-{1} us | "
           "LT = re {2} us".format(a.span, min(a.max_us, ESC_MAX_US), ESC_RE_US))
     print("       Back ou Home = parada")
+    print("DESLIGAR: LB + RB juntos por {0:.0f} s, sem corrida (as rodas mexem; espere o "
+          "Jetson desligar antes de tirar a bateria)".format(DESLIGA_S))
+    if not pode_desligar():
+        print("  " + _SEM_REGRA)
     print("CORRIDA: Start = estaciona e larga o modelo | Back = para | limite {0:.0f} s{1}"
           .format(opcoes.seconds, " | gravando em runs/" if a.grava else ""))
     print("Ctrl+C: sai")
@@ -343,13 +390,36 @@ def main(argv=None):
     # comando vai de novo no quadro seguinte (ai/car/escrita_tolerante.py).
     escrita = EscritaTolerante(atuadores.manda)
     watchdog = FrameWatchdog(WATCHDOG_S)
+    desligar = SegurarParaDesligar(DESLIGA_S)
     ultimo_status, ultimo_aviso = 0.0, None
     quadros, inicio_quadros = 0, time.monotonic()
     motivo_saida = "interrompido"
+    desligando = False
     try:
         while True:
             relatorio = controle.le(LEITURA_CORRIDA_MS if unico.correndo else LEITURA_MS)
-            cmd = unico.passo(None if relatorio is None else estado(relatorio))
+            agora_estado = None if relatorio is None else estado(relatorio)
+            cmd = unico.passo(agora_estado)
+            if desligar.passo(agora_estado, unico.correndo):
+                # Rodas mexendo tem que querer dizer "esta desligando": sem a
+                # regra do sudo, nada de aviso.
+                if not pode_desligar():
+                    print(_SEM_REGRA)
+                else:
+                    estaciona()
+                    print("=== LB + RB: DESLIGANDO O JETSON. Espere ele terminar antes de "
+                          "tirar a bateria. ===")
+                    avisa_com_as_rodas(escrita.manda, a.span)
+                    # O desligamento do sistema manda SIGINT a este programa (o
+                    # servico para assim); ignorado, a saida segura vai inteira.
+                    signal.signal(signal.SIGINT, signal.SIG_IGN)
+                    if desliga_o_jetson():
+                        motivo_saida, desligando = "desligando o Jetson (LB + RB)", True
+                        break
+                    signal.signal(signal.SIGINT, signal.default_int_handler)
+                    print("!!! O COMANDO DE DESLIGAR FALHOU: o Jetson continua ligado. "
+                          "Nao tire a bateria. !!!")
+                    continue      # o comando deste giro e de antes do aviso
             travou = watchdog.tick(time.monotonic())
             agora = time.monotonic()
             if cmd is None:
@@ -398,7 +468,7 @@ def main(argv=None):
         except IOError:
             pass
         print("\n{0}saindo: {1}".format("estado seguro. " if seguro else "", motivo_saida))
-    return 0 if motivo_saida == "interrompido" else 1
+    return 0 if motivo_saida == "interrompido" or desligando else 1
 
 
 if __name__ == "__main__":

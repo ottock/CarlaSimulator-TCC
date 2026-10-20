@@ -33,6 +33,8 @@ _TAMANHO_LEITURA = 64
 # visto de fato no Jetson.
 START = 1 << 4
 BACK = 1 << 5
+LB = 1 << 8
+RB = 1 << 9
 HOME = 1 << 10
 
 

@@ -19,8 +19,15 @@ O que o servico garante, e por que:
     camera ainda nao apareceram no boot, controle perdido, erro), abre de novo
     5 s depois, sem desistir. Parado com Ctrl+C/systemctl stop, fica parado.
 
+E a regra do sudo para desligar pelo controle (LB + RB por 3 s, pedido do
+Rafael em 2026-10-20): o programa nao e root, entao o sudo libera SO o
+``/sbin/shutdown -h now`` sem senha, em /etc/sudoers.d/carro-desligar. Uma regra
+quebrada pode travar o sudo inteiro, entao ela e gravada com um nome com ponto
+(que o sudo ignora), conferida pelo visudo e so entao renomeada.
+
 COMO USAR (no Jetson, SEM sudo -- ele pede a senha quando precisa)
   python3 hardware/servico_carro.py mostra            # so imprime o servico
+                                                      # e a regra do sudo
   python3 hardware/servico_carro.py instala           # abre em todo boot
   python3 hardware/servico_carro.py instala --grava   # flags extras vao para
                                                       # o controle_8bitdo.py
@@ -32,6 +39,7 @@ COMO USAR (no Jetson, SEM sudo -- ele pede a senha quando precisa)
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 
@@ -40,6 +48,9 @@ _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOME = "carro-controle.service"
 DESTINO = "/etc/systemd/system/" + NOME
 PROGRAMA = "hardware/controle_8bitdo.py"
+REGRA = "/etc/sudoers.d/carro-desligar"
+# O mesmo comando que o controle_8bitdo.py roda; o sudo confere os argumentos.
+DESLIGAR = "/sbin/shutdown -h now"
 
 # O que o programa precisa do terminal. LD_LIBRARY_PATH: as bibliotecas do CUDA
 # (libcurand.so.10 sumiu com sudo). OPENBLAS_CORETYPE: o conserto comum do numpy
@@ -97,6 +108,19 @@ def unidade(usuario, repo, python, ambiente, extras=()):
                           comando=comando)
 
 
+def regra_do_sudo(usuario):
+    """O arquivo do sudoers que deixa ``usuario`` desligar o Jetson sem senha.
+
+    Raises:
+        ValueError: nome de usuario que mudaria o sentido da regra.
+    """
+    if not re.match(r"^[a-z_][a-z0-9_-]*$", usuario):
+        raise ValueError("nome de usuario estranho para a regra do sudo: %r" % usuario)
+    return ("# Gerado por hardware/servico_carro.py: LB + RB por 3 s no controle\n"
+            "# desligam o Jetson. So este comando, exatamente com estes argumentos.\n"
+            "{0} ALL=(root) NOPASSWD: {1}\n".format(usuario, DESLIGAR))
+
+
 def _usuario():
     import pwd      # so existe no Linux
 
@@ -130,24 +154,35 @@ def main(argv=None):
     if a.acao == "remove":
         _roda(["sudo", "systemctl", "disable", "--now", NOME])
         _roda(["sudo", "rm", "-f", DESTINO])
+        _roda(["sudo", "rm", "-f", REGRA])
         _roda(["sudo", "systemctl", "daemon-reload"])
         print("Removido: o programa nao abre mais sozinho.")
         return 0
 
-    texto = unidade(_usuario(), _REPO, _python(), ambiente_do_terminal(os.environ),
+    usuario = _usuario()
+    texto = unidade(usuario, _REPO, _python(), ambiente_do_terminal(os.environ),
                     extras=a.extras)
+    regra = regra_do_sudo(usuario)
     if a.acao == "mostra":
         print(texto)
+        print("--- " + REGRA)
+        print(regra)
         return 0
 
     _roda(["sudo", "tee", DESTINO], entrada=texto.encode("utf-8"))
     _roda(["sudo", "systemctl", "daemon-reload"])
     _roda(["sudo", "systemctl", "enable", NOME])
+    rascunho = REGRA + ".novo"
+    _roda(["sudo", "tee", rascunho], entrada=regra.encode("utf-8"))
+    _roda(["sudo", "visudo", "-c", "-f", rascunho])
+    _roda(["sudo", "chmod", "0440", rascunho])
+    _roda(["sudo", "mv", rascunho, REGRA])
     print("")
     print("Instalado. O programa abre sozinho no proximo boot.")
     print("  Abrir agora:      sudo systemctl start carro-controle")
     print("  Ver o que imprime: journalctl -u carro-controle -f")
     print("  Parar (estaciona): sudo systemctl stop carro-controle")
+    print("  Desligar o Jetson: LB + RB juntos por 3 s no controle")
     print("  Desfazer:          python3 hardware/servico_carro.py remove")
     return 0
 

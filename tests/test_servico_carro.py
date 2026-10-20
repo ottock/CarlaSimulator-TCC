@@ -126,6 +126,7 @@ def test_mostra_prints_the_unit_and_touches_nothing(sc, monkeypatch, capsys):
     assert sc.main(["mostra"]) == 0
     saida = capsys.readouterr().out
     assert "KillSignal=SIGINT" in saida and "User=jetson" in saida
+    assert "NOPASSWD: /sbin/shutdown -h now" in saida
     assert sistema.comandos == []
 
 
@@ -133,12 +134,40 @@ def test_instala_writes_the_unit_and_enables_it_for_the_next_boot(sc, monkeypatc
     sistema = _prepara(sc, monkeypatch)
     assert sc.main(["instala", "--grava"]) == 0
     destino = "/etc/systemd/system/carro-controle.service"
-    escrita, recarga, habilita = sistema.comandos
+    escrita, recarga, habilita = sistema.comandos[:3]
     assert escrita[0] == ["sudo", "tee", destino]
     assert "controle_8bitdo.py --grava" in escrita[1].decode("utf-8")
     assert recarga[0] == ["sudo", "systemctl", "daemon-reload"]
     # So habilita: o carro nao comeca a ouvir o controle no meio da instalacao.
     assert habilita[0] == ["sudo", "systemctl", "enable", "carro-controle.service"]
+
+
+def test_instala_lets_the_program_shut_the_jetson_down(sc, monkeypatch):
+    # LB + RB por 3 s desliga o Jetson; o programa nao e root, entao o sudo
+    # precisa deixar SO esse comando sem senha.
+    sistema = _prepara(sc, monkeypatch)
+    sc.main(["instala"])
+    rascunho = "/etc/sudoers.d/carro-desligar.novo"
+    assert [c for c, _ in sistema.comandos[3:]] == [
+        ["sudo", "tee", rascunho],
+        # Uma regra quebrada pode travar o sudo inteiro: confere antes de valer.
+        # Enquanto o nome tem ponto, o sudo ignora o arquivo.
+        ["sudo", "visudo", "-c", "-f", rascunho],
+        ["sudo", "chmod", "0440", rascunho],
+        ["sudo", "mv", rascunho, "/etc/sudoers.d/carro-desligar"]]
+    assert sistema.comandos[3][1].decode("utf-8") == sc.regra_do_sudo("jetson")
+
+
+def test_the_sudo_rule_allows_only_shutting_down_now(sc):
+    regras = [l for l in sc.regra_do_sudo("jetson").splitlines()
+              if l.strip() and not l.startswith("#")]
+    assert regras == ["jetson ALL=(root) NOPASSWD: /sbin/shutdown -h now"]
+
+
+@pytest.mark.parametrize("usuario", ["jet son", "root ALL=(ALL) NOPASSWD: ALL #", ""])
+def test_a_user_name_that_could_change_the_sudo_rule_is_refused(sc, usuario):
+    with pytest.raises(ValueError):
+        sc.regra_do_sudo(usuario)
 
 
 def test_remove_stops_disables_and_deletes(sc, monkeypatch):
@@ -148,6 +177,7 @@ def test_remove_stops_disables_and_deletes(sc, monkeypatch):
     assert comandos == [
         ["sudo", "systemctl", "disable", "--now", "carro-controle.service"],
         ["sudo", "rm", "-f", "/etc/systemd/system/carro-controle.service"],
+        ["sudo", "rm", "-f", "/etc/sudoers.d/carro-desligar"],
         ["sudo", "systemctl", "daemon-reload"]]
 
 

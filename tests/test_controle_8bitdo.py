@@ -11,6 +11,7 @@ com sudo, nao achou as bibliotecas do CUDA.
 import argparse
 import importlib.util
 import os
+import signal
 import struct
 import sys
 import time
@@ -33,6 +34,8 @@ ACELERADO = 331           # 1620 us: RT no fundo com o teto padrao
 MODELO = (296, 329)       # o laco de mentira manda 1450 us no servo e 1610 no ESC
 SERVO, ESC = 15, 12
 START, BACK = 0x10, 0x20
+LB_RB = 0x0300            # LB (bit 8) + RB (bit 9): desliga o Jetson
+ESQUERDA, DIREITA = 245, 368   # 1200 e 1800 us: o volante a mao vai ate +-300 us
 NADA = OSError(110, "Operation timed out")   # o controle nao mandou nada
 
 
@@ -179,8 +182,12 @@ class Runtime(object):
             cria_laco=cria_laco)
 
 
-def _carrega(monkeypatch, placa, adaptador, runtime=None, euid=1000):
+def _carrega(monkeypatch, placa, adaptador, runtime=None, euid=1000, pode_desligar=True,
+             desliga_ok=True):
     runtime = runtime or Runtime(placa)
+    # O que o programa fez para desligar o Jetson, na ordem: ("sinal", acao) e
+    # ("desliga", quantas escritas a placa tinha recebido ate ali).
+    runtime.eventos = []
     monkeypatch.setitem(sys.modules, "Adafruit_PCA9685",
                         types.SimpleNamespace(PCA9685=placa))
     monkeypatch.setitem(sys.modules, "jetson_runtime", runtime.modulo())
@@ -190,11 +197,17 @@ def _carrega(monkeypatch, placa, adaptador, runtime=None, euid=1000):
     monkeypatch.setattr(cm, "acha_adaptador", lambda: adaptador)
     monkeypatch.setattr(cm.time, "sleep", lambda s: None)   # armar o ESC, sair
     monkeypatch.setattr(cm.os, "geteuid", lambda: euid, raising=False)
+    monkeypatch.setattr(cm, "DESLIGA_S", 0.05)                # segurar 3 s, encurtado
+    monkeypatch.setattr(cm, "pode_desligar", lambda: pode_desligar)
+    monkeypatch.setattr(cm, "desliga_o_jetson", lambda: runtime.eventos.append(
+        ("desliga", len(placa.escritas))) or desliga_ok)
+    monkeypatch.setattr(cm.signal, "signal",
+                        lambda sinal, acao: runtime.eventos.append(("sinal", sinal, acao)))
     return cm, runtime
 
 
-def _roda(monkeypatch, placa, adaptador, runtime=None, args=()):
-    cm, runtime = _carrega(monkeypatch, placa, adaptador, runtime)
+def _roda(monkeypatch, placa, adaptador, runtime=None, args=(), **kw):
+    cm, runtime = _carrega(monkeypatch, placa, adaptador, runtime, **kw)
     return cm.main(list(_ARGS) + list(args)), runtime
 
 
@@ -348,3 +361,60 @@ def test_an_unexpected_error_is_not_reported_as_an_interruption(monkeypatch, cap
     saida = capsys.readouterr().out
     assert "interrompido" not in saida
     assert placa.escritas[-2:] == [(SERVO, 0), (ESC, 0)]
+
+
+# ------------------------------------------------- desligar pelo controle
+
+def _desligamentos(runtime):
+    return [e for e in runtime.eventos if e[0] == "desliga"]
+
+
+def test_holding_lb_rb_parks_waves_the_wheels_and_shuts_the_jetson_down(monkeypatch, capsys):
+    placa = Placa()
+    codigo, runtime = _roda(monkeypatch, placa, Adaptador(
+        [_relatorio(rt=255), _relatorio(botoes=LB_RB)], fim_s=1.0))
+    saida = capsys.readouterr().out
+    assert codigo == 0 and "desligando o Jetson" in saida
+    (_, escritas_antes), = _desligamentos(runtime)
+    # Antes do comando: estacionou e virou as rodas para os dois lados, com o
+    # ESC em neutro o tempo todo depois de soltar o RT.
+    pares = [(placa.escritas[i][1], placa.escritas[i + 1][1])
+             for i in range(0, escritas_antes - 1, 2)]
+    depois_do_rt = pares[max(i for i, (_, e) in enumerate(pares) if e == ACELERADO) + 1:]
+    assert {e for _, e in depois_do_rt} == {NEUTRO}
+    assert ESQUERDA in [s for s, _ in depois_do_rt] and DIREITA in [s for s, _ in depois_do_rt]
+    assert depois_do_rt[-1] == (CENTRO, NEUTRO)
+    # O desligamento do sistema manda SIGINT ao servico: ignorado, para a saida
+    # segura do programa terminar inteira.
+    assert runtime.eventos.index(("sinal", signal.SIGINT, signal.SIG_IGN)) <         runtime.eventos.index(_desligamentos(runtime)[0])
+    assert placa.escritas[-2:] == [(SERVO, 0), (ESC, 0)]
+
+
+def test_without_the_sudo_rule_the_wheels_do_not_wave_and_driving_goes_on(monkeypatch, capsys):
+    placa = Placa()
+    codigo, runtime = _roda(monkeypatch, placa, Adaptador([_relatorio(botoes=LB_RB)]),
+                            pode_desligar=False)
+    saida = capsys.readouterr().out
+    assert _desligamentos(runtime) == []
+    assert "INDISPONIVEL" in saida and "servico_carro.py instala" in saida
+    assert ESQUERDA not in [s for s, _ in placa.pares()]
+    assert codigo == 1 and "controle perdido" in saida      # o fim do roteiro
+
+
+def test_lb_rb_during_a_run_does_not_shut_down(monkeypatch, capsys):
+    placa = Placa()
+    codigo, runtime = _roda(monkeypatch, placa, Adaptador(
+        [_relatorio(botoes=START), _relatorio(botoes=START | LB_RB)]))
+    assert _desligamentos(runtime) == []
+    assert codigo == 1
+
+
+def test_a_failed_shutdown_keeps_the_program_and_ctrl_c_working(monkeypatch, capsys):
+    placa = Placa()
+    codigo, runtime = _roda(monkeypatch, placa, Adaptador([_relatorio(botoes=LB_RB)]),
+                            desliga_ok=False)
+    saida = capsys.readouterr().out
+    assert len(_desligamentos(runtime)) == 1
+    assert "DESLIGAR FALHOU" in saida
+    assert runtime.eventos[-1] == ("sinal", signal.SIGINT, signal.default_int_handler)
+    assert codigo == 1 and "controle perdido" in saida
