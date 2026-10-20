@@ -302,6 +302,23 @@ def test_running_as_root_is_refused_before_touching_anything(monkeypatch):
     assert abertos == [] and runtime.aberturas == 0
 
 
+def test_an_adapter_held_by_the_boot_service_says_how_to_stop_it(monkeypatch):
+    # Com o servico do boot rodando (hardware/servico_carro.py), uma segunda
+    # copia aberta a mao acha o adaptador ocupado. A mensagem antiga mandava
+    # conferir a regra de permissao, que nao tem nada a ver.
+    class Ocupado(Adaptador):
+        def write(self, *a):
+            raise OSError(16, "Resource busy")
+
+    placa = Placa()
+    cm, runtime = _carrega(monkeypatch, placa, Ocupado([]))
+    with pytest.raises(SystemExit) as saida:
+        cm.main(list(_ARGS))
+    assert "sudo systemctl stop carro-controle" in str(saida.value.code)
+    assert "permissao" not in str(saida.value.code)
+    assert placa.escritas == [] and runtime.aberturas == 0
+
+
 # ---------------------------------------------------------------- I2C
 
 def test_a_momentary_i2c_failure_does_not_end_the_drive(monkeypatch, capsys):

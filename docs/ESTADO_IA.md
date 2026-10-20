@@ -91,8 +91,10 @@ Onde ficam os dados/pesos (fora do OneDrive, para não corromper sync):
 >     mediana, ~6 cm no pior caso). Nas 21 pistas de avaliação: **21/21 a 2 m/s e 21/21 a ~2,6 m/s**
 >     (`--velocidade-alvo 2.0` / `3.0`), inclusive SDSSES/SESSDS, onde o v6c batia. Estresse com
 >     acelerador fixo 0,30 (5 m/s nas fechadas, nunca usado antes): v8d1 18/21 (30 colisões, 25 na
->     SESSDS) contra v5d1 19/21 (2) — perto do limite o v8d1 é um pouco pior. **Falta o teste no
->     carro real contra o v5d1** (a tag `melhor-v5d1` continua sendo o modelo da feira).
+>     SESSDS) contra v5d1 19/21 (2) — perto do limite o v8d1 é um pouco pior.
+>   - **❌ No carro real o v8d1 não funcionou bem** (relato do Rafael em 2026-10-20, sem detalhar
+>     o que falhou): **fica o v5d1 para a feira**. É a segunda vez que o gêmeo aprova o que a pista
+>     reprova. O `models/driving_grade_v8d1.onnx` fica no repositório só como registro.
 > - **O gêmeo errou a ordem:** calibrado, ele dava os dois limpos em 21/21 pistas e o v4 como o
 >   mais centralizado. No carro foi o contrário. O simulador serve para descartar o que não
 >   funciona; **quem decide entre candidatos é a pista real**.

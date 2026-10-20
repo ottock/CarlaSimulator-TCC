@@ -302,3 +302,73 @@ abertos **uma vez** para várias corridas e que o controle é lido sem esperar d
 Também foi conferido que o `main()` do `jetson_runtime.py` antes e depois da separação das
 funções monta exatamente a mesma corrida. **Não testado:** a corrida dentro do programa no
 carro.
+
+## 9. Abrir sozinho quando o Jetson liga (dia da feira)
+
+**Pedido do Rafael em 2026-10-20:** na feira só o `controle_8bitdo.py` roda, e o carro não tem
+monitor nem teclado. Ligou o Jetson, o programa tem que estar aberto. Quem faz isso é um serviço
+do systemd, instalado por `hardware/servico_carro.py`. **Escrito e testado no PC; ainda não rodou
+no Jetson.**
+
+O serviço (`carro-controle`):
+
+- roda como o **seu usuário**, não root (o programa recusa root, seção 6);
+- leva o `LD_LIBRARY_PATH` (as bibliotecas do CUDA) **do terminal onde você instalou**: um serviço
+  não lê o `.bashrc`, e foi a falta disso que derrubou a corrida com sudo em 2026-10-14. Instale
+  do mesmo terminal em que o programa funciona à mão;
+- **para com SIGINT, igual ao Ctrl+C**: o programa estaciona o carro (centro e neutro) antes de
+  sair. Com o SIGTERM, o padrão do systemd, ele morreria sem estacionar e o PCA9685 continuaria
+  mandando o último pulso. Vale também para `sudo shutdown`;
+- espera o daemon da câmera (`nvargus-daemon`) e, se o programa cair (adaptador ou câmera ainda
+  não apareceram no boot, controle perdido, erro), **abre de novo 5 s depois**, sem desistir.
+  Parado com `systemctl stop`, fica parado.
+
+```bash
+python3 hardware/servico_carro.py mostra            # só imprime o serviço, não instala
+python3 hardware/servico_carro.py instala           # abre em todo boot (pede a senha do sudo)
+python3 hardware/servico_carro.py instala --grava   # flags extras vão para o controle_8bitdo.py
+python3 hardware/servico_carro.py remove            # para e desfaz
+
+sudo systemctl start carro-controle                 # abrir agora, sem reiniciar
+journalctl -u carro-controle -f                     # ver o que o programa imprime
+sudo systemctl stop carro-controle                  # parar (estaciona o carro)
+```
+
+Rode o `servico_carro.py` **sem sudo**: ele pede a senha só para gravar o serviço. O `instala`
+apenas habilita, e o programa só abre no próximo boot ou com o `start`.
+
+**Com o serviço rodando, nada mais pode usar o carro.** Antes de abrir qualquer programa à mão
+(`controle_8bitdo.py`, `jetson_runtime.py`, calibrações), rode `sudo systemctl stop
+carro-controle`. Uma segunda cópia do programa do controle acha o adaptador ocupado e sai com uma
+mensagem que diz isso. Os outros programas não avisam: o `jetson_runtime.py` falha na câmera, e
+os de calibração escreveriam no PCA9685 junto com o serviço.
+
+### Como saber que está pronto, sem monitor
+
+Mexa o analógico esquerdo: **quando as rodas virarem, o programa está pronto**. Antes disso ele
+ainda está carregando o modelo, a câmera e o LiDAR (não cronometrado; o mesmo tempo de abrir à
+mão). Não aperte Start antes de as rodas responderem.
+
+### Testes antes da feira, com as rodas no ar
+
+1. `python3 hardware/servico_carro.py mostra`: confira que aparece a linha
+   `Environment="LD_LIBRARY_PATH=..."` com o caminho do CUDA.
+2. `instala`, depois `sudo systemctl start carro-controle` e `journalctl -u carro-controle -f`:
+   deve aparecer `=== Controle 8BitDo ===`. O volante responde, Start larga e Back para.
+3. `sudo systemctl stop carro-controle`: o journal deve terminar em
+   `estado seguro. saindo: interrompido`. É a prova de que parar o serviço estaciona o carro.
+4. **Controle desligado, reinicie o Jetson**, espere uns 2 minutos e só então ligue o controle.
+   O volante responde? **Nunca testado:** até hoje o programa sempre abriu com o controle já
+   ligado, e não sabemos se os dois comandos de abertura (seção 2) precisam ser reenviados
+   quando o controle se liga depois (seção 7).
+5. Com tudo funcionando, desligue o controle (segure o Home) e ligue de novo. O volante volta a
+   responder? Na feira isso vai acontecer sozinho: o controle desliga depois de 15 minutos sem
+   uso, segundo o manual.
+
+Se o 4 ou o 5 falharem, o controle precisa dos comandos de abertura de novo. O contorno, até
+mudar o código, é reiniciar o programa com o controle já ligado: `sudo systemctl restart
+carro-controle`, ou desligar e religar o Jetson.
+
+Testado no PC: `tests/test_servico_carro.py` (o serviço gerado e os comandos de instalar e
+remover, com sudo e systemctl de mentira) e, em `tests/test_controle_8bitdo.py`, a mensagem do
+adaptador ocupado.

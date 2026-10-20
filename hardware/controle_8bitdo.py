@@ -78,11 +78,16 @@ COMO USAR
   sudo o programa recusa rodar: em 2026-10-14 o runtime, como root, nao achou
   as bibliotecas do CUDA.
 
+  Para abrir sozinho quando o Jetson liga (feira): hardware/servico_carro.py.
+  Com o servico rodando, pare-o antes de abrir esta copia a mao
+  (sudo systemctl stop carro-controle).
+
 A corrida dentro do programa foi escrita em 2026-10-17 e ainda NAO rodou no
 Jetson: primeira vez com as rodas no ar.
 """
 import argparse
 import datetime
+import errno
 import os
 import sys
 import time
@@ -282,6 +287,11 @@ def main(argv=None):
     except ControlePerdido as erro:
         sys.exit(str(erro))
     except IOError as erro:
+        if erro.errno == errno.EBUSY:
+            sys.exit("o adaptador do controle ja esta em uso por outro programa: "
+                     "provavelmente\nesta mesma copia, aberta no boot pelo servico "
+                     "(hardware/servico_carro.py).\nPara rodar a mao: sudo systemctl "
+                     "stop carro-controle")
         sys.exit("nao consegui abrir o adaptador: {0}\n"
                  "Sem sudo, e preciso da regra de permissao "
                  "(docs/CONTROLE_8BITDO.md, secao 7).".format(erro))
