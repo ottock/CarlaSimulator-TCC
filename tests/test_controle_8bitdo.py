@@ -232,15 +232,16 @@ def test_driving_by_hand_then_a_run_then_back_to_the_hand(monkeypatch, capsys):
     codigo, runtime = _roda(monkeypatch, placa, adaptador)
     assert codigo == 1 and "controle perdido" in capsys.readouterr().out
     pares = placa.pares()
-    assert pares[:7] == [
+    assert pares[:10] == [
         (CENTRO, NEUTRO),      # ao abrir
+        (ESQUERDA, NEUTRO), (DIREITA, NEUTRO), (CENTRO, NEUTRO),   # pronto
         (CENTRO, ACELERADO),   # a mao, RT no fundo
         (CENTRO, NEUTRO),      # Start: estaciona antes do primeiro quadro
         MODELO, MODELO, MODELO,   # o modelo dirige: quadro do Start + dois
         (CENTRO, NEUTRO),      # Back: estaciona na hora
     ]
     # Depois: manual TRAVADO (o RT ficou apertado), saida estacionada, canais soltos.
-    assert set(pares[7:-1]) == {(CENTRO, NEUTRO)}
+    assert set(pares[10:-1]) == {(CENTRO, NEUTRO)}
     assert pares[-1] == (0, 0)
     assert runtime.descartes == 1          # fila do LiDAR jogada fora antes da corrida
 
@@ -272,7 +273,8 @@ def test_an_error_in_the_model_stops_the_run_but_not_the_program(monkeypatch, ca
     saida = capsys.readouterr().out
     assert codigo == 1 and "controle perdido" in saida    # seguiu ate o controle sumir
     assert "Remote I/O error" in saida
-    assert placa.pares()[2] == (CENTRO, NEUTRO)           # estacionado no lugar do quadro
+    # Abrir, o aviso de pronto (3), o Start e, no lugar do quadro, estacionado.
+    assert placa.pares()[5] == (CENTRO, NEUTRO)
 
 
 def test_ctrl_c_during_a_run_parks_the_car_and_exits(monkeypatch, capsys):
@@ -373,6 +375,23 @@ def test_an_unexpected_error_is_not_reported_as_an_interruption(monkeypatch, cap
     assert placa.escritas[-2:] == [(SERVO, 0), (ESC, 0)]
 
 
+# ------------------------------------------------------ aviso de pronto
+
+def test_when_ready_the_wheels_go_one_way_the_other_and_back(monkeypatch, capsys):
+    # Pedido do Rafael em 2026-10-21: sem monitor, saber quando ligar o
+    # controle. Uma ida e volta = pronto; duas = desligando.
+    placa = Placa()
+    _roda(monkeypatch, placa, Adaptador([], fim_s=0.05))
+    pares = placa.pares()
+    esquerda = pares.index((ESQUERDA, NEUTRO))
+    assert pares[esquerda:esquerda + 3] == [(ESQUERDA, NEUTRO), (DIREITA, NEUTRO),
+                                            (CENTRO, NEUTRO)]
+    assert [s for s, _ in pares].count(ESQUERDA) == 1
+    # Depois de armar o ESC em neutro, antes de ouvir o controle.
+    assert pares[:esquerda] and set(pares[:esquerda]) == {(CENTRO, NEUTRO)}
+    assert "PRONTO" in capsys.readouterr().out
+
+
 # ------------------------------------------------- desligar pelo controle
 
 def _desligamentos(runtime):
@@ -392,7 +411,9 @@ def test_holding_lb_rb_parks_waves_the_wheels_and_shuts_the_jetson_down(monkeypa
              for i in range(0, escritas_antes - 1, 2)]
     depois_do_rt = pares[max(i for i, (_, e) in enumerate(pares) if e == ACELERADO) + 1:]
     assert {e for _, e in depois_do_rt} == {NEUTRO}
-    assert ESQUERDA in [s for s, _ in depois_do_rt] and DIREITA in [s for s, _ in depois_do_rt]
+    # Duas idas e voltas: diferente do aviso de pronto, que e uma.
+    assert [s for s, _ in depois_do_rt].count(ESQUERDA) == 2
+    assert [s for s, _ in depois_do_rt].count(DIREITA) == 2
     assert depois_do_rt[-1] == (CENTRO, NEUTRO)
     # O desligamento do sistema manda SIGINT ao servico: ignorado, para a saida
     # segura do programa terminar inteira.
@@ -407,7 +428,8 @@ def test_without_the_sudo_rule_the_wheels_do_not_wave_and_driving_goes_on(monkey
     saida = capsys.readouterr().out
     assert _desligamentos(runtime) == []
     assert "INDISPONIVEL" in saida and "servico_carro.py instala" in saida
-    assert ESQUERDA not in [s for s, _ in placa.pares()]
+    # So o aviso de pronto (uma ida e volta), nenhum aviso de desligar.
+    assert [s for s, _ in placa.pares()].count(ESQUERDA) == 1
     assert codigo == 1 and "controle perdido" in saida      # o fim do roteiro
 
 

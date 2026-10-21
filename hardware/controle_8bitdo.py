@@ -12,6 +12,9 @@ mesmo DriveLoop, com as mesmas opcoes). O controle e lido direto da USB
 (docs/CONTROLE_8BITDO.md).
 
 COMANDOS
+  Ao abrir, depois de carregar tudo, as rodas fazem UMA ida e volta: pronto,
+  pode ligar o controle.
+
   Sem corrida, voce dirige:
   analogico esquerdo, para os lados   volante, proporcional. Mesma conversao
                                       e mesmo sentido do runtime, mas com
@@ -31,7 +34,8 @@ COMANDOS
   Back, com corrida                   para na hora e volta ao manual, parado
                                       ate os gatilhos serem soltos.
   LB + RB juntos por 3 s, sem corrida estaciona, vira as rodas para os dois
-                                      lados (o aviso) e DESLIGA O JETSON. So
+                                      lados DUAS vezes (o aviso) e DESLIGA O
+                                      JETSON. So
                                       tire a bateria depois que ele terminar
                                       de desligar. Precisa da regra do sudo
                                       que o hardware/servico_carro.py instala;
@@ -222,10 +226,11 @@ def desliga_o_jetson():
         return False
 
 
-def avisa_com_as_rodas(manda, span_us):
-    """Vira as rodas para os dois lados, duas vezes, com o ESC em neutro: o
-    sinal, sem monitor, de que o Jetson vai desligar."""
-    for lado in (-1, 1, -1, 1, 0):
+def avisa_com_as_rodas(manda, span_us, vezes):
+    """Vira as rodas para um lado e para o outro ``vezes`` vezes e volta ao
+    centro, com o ESC em neutro: os sinais sem monitor. Uma vez = o programa
+    esta pronto (pode ligar o controle); duas = o Jetson vai desligar."""
+    for lado in (-1, 1) * vezes + (0,):
         manda(STEER_CENTER_US + lado * span_us, ESC_NEUTRAL_US)
         time.sleep(AVISO_RODAS_S)
 
@@ -410,6 +415,11 @@ def main(argv=None):
     ultima_noticia = ultima_abertura = time.monotonic()
     reabriu = False
     try:
+        # Sem monitor, o sinal de que o carregamento acabou e o controle ja pode
+        # ser ligado (pedido do Rafael em 2026-10-21): uma ida e volta.
+        print("=== PRONTO: as rodas fazem uma ida e volta. Pode ligar o controle. ===")
+        avisa_com_as_rodas(escrita.manda, a.span, vezes=1)
+        ultima_noticia = ultima_abertura = time.monotonic()
         while True:
             relatorio = controle.le(LEITURA_CORRIDA_MS if unico.correndo else LEITURA_MS)
             agora_le = time.monotonic()
@@ -442,7 +452,7 @@ def main(argv=None):
                     estaciona()
                     print("=== LB + RB: DESLIGANDO O JETSON. Espere ele terminar antes de "
                           "tirar a bateria. ===")
-                    avisa_com_as_rodas(escrita.manda, a.span)
+                    avisa_com_as_rodas(escrita.manda, a.span, vezes=2)
                     # O desligamento do sistema manda SIGINT a este programa (o
                     # servico para assim); ignorado, a saida segura vai inteira.
                     signal.signal(signal.SIGINT, signal.SIG_IGN)

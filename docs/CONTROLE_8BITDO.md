@@ -347,9 +347,21 @@ os de calibração escreveriam no PCA9685 junto com o serviço.
 
 ### Como saber que está pronto, sem monitor
 
-Mexa o analógico esquerdo: **quando as rodas virarem, o programa está pronto**. Antes disso ele
-ainda está carregando o modelo, a câmera e o LiDAR (não cronometrado; o mesmo tempo de abrir à
-mão). Não aperte Start antes de as rodas responderem.
+**Quando termina de carregar, o programa vira as rodas para um lado, para o outro e de volta ao
+centro (uma ida e volta), com o ESC em neutro.** É o sinal para ligar o controle (pedido do
+Rafael em 2026-10-21). Antes disso ele ainda está carregando o modelo, a câmera e o LiDAR (não
+cronometrado; o mesmo tempo de abrir à mão). Se o serviço reabrir o programa depois de uma
+queda, o aviso aparece de novo.
+
+Os dois avisos das rodas:
+
+| Rodas | Quer dizer |
+|---|---|
+| **uma** ida e volta | pronto: pode ligar o controle |
+| **duas** idas e voltas | LB + RB: o Jetson está desligando (abaixo) |
+
+Ligado o controle, mexa o analógico: as rodas devem acompanhar em até ~3 s (o reenvio da
+abertura, testes 4 e 5). Não aperte Start antes de o volante responder.
 
 ### Testes antes da feira, com as rodas no ar
 
