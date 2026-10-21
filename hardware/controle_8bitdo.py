@@ -55,6 +55,16 @@ PROTECOES
     o RT no fundo com o analogico parado tambem e silencio, e pode parar o
     carro numa reta. Se acontecer demais, aumente --silencio-s.
   - Adaptador sumiu da USB: para a corrida, se houver, estaciona e sai.
+  - Controle mudo por REABRE_S (3 s), sem corrida: o programa reenvia a
+    abertura ao adaptador, e repete a cada 3 s. Visto no carro em 2026-10-21:
+    ligado DEPOIS do programa, o controle ficava mudo ate reiniciar o
+    programa (hipotese: o adaptador espera a abertura de novo; reiniciar e
+    justamente reenvia-la). Vale tambem para o
+    controle que desliga sozinho depois de 15 min sem uso. Depois de cada
+    reabertura o acelerador fica PARADO ate os dois gatilhos serem soltos: o
+    adaptador guarda o ultimo estado do controle, e um RT "preso" repetido
+    nao pode acelerar. Na corrida nao reabre (com o controle desligado, cada
+    tentativa pode travar o laco por ate ~2 s).
   - Fio do I2C que solta por um instante (visto em 2026-10-14, Errno 121), no
     modo manual: o programa nao cai, o comando vai de novo no quadro seguinte
     e a tela conta as falhas. Falhando por 0,1 s seguidos, ele sai, tenta o
@@ -157,6 +167,8 @@ _AVISOS = {
 DESLIGA_S = SEGURAR_S
 COMANDO_DESLIGAR = ["/sbin/shutdown", "-h", "now"]
 AVISO_RODAS_S = 0.3
+# Controle mudo por tanto tempo, fora de corrida: reenvia a abertura.
+REABRE_S = 3.0
 _SEM_REGRA = ("LB + RB: desligar INDISPONIVEL -- o sudo pede senha. Instale a regra: "
               "python3 hardware/servico_carro.py instala")
 
@@ -395,9 +407,30 @@ def main(argv=None):
     quadros, inicio_quadros = 0, time.monotonic()
     motivo_saida = "interrompido"
     desligando = False
+    ultima_noticia = ultima_abertura = time.monotonic()
+    reabriu = False
     try:
         while True:
             relatorio = controle.le(LEITURA_CORRIDA_MS if unico.correndo else LEITURA_MS)
+            agora_le = time.monotonic()
+            if relatorio is not None:
+                ultima_noticia = agora_le
+                if reabriu:
+                    print("controle respondeu depois de reenviar a abertura")
+                    reabriu = False
+            elif (not unico.correndo and agora_le - ultima_noticia >= REABRE_S
+                  and agora_le - ultima_abertura >= REABRE_S):
+                # Ligado depois do programa (ou depois de desligar sozinho), o
+                # controle so fala de novo com a abertura reenviada.
+                print("controle mudo ha {0:.0f} s: reenviei a abertura".format(
+                    agora_le - ultima_noticia))
+                try:
+                    controle.abre()
+                except IOError:
+                    pass              # sem controle ligado pode nao responder
+                ultima_abertura = time.monotonic()
+                manual.trava()
+                reabriu = True
             agora_estado = None if relatorio is None else estado(relatorio)
             cmd = unico.passo(agora_estado)
             if desligar.passo(agora_estado, unico.correndo):

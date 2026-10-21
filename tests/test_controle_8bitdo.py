@@ -71,19 +71,24 @@ class Placa(object):
 
 
 class Adaptador(object):
-    """O controle: entrega o roteiro; depois, silencio ate ``fim_s``, e some."""
+    """O controle: entrega o roteiro; depois, silencio ate ``fim_s``, e some.
+
+    No roteiro, um ``float`` e silencio de verdade por esse tanto de segundos.
+    ``aberturas`` conta as mensagens de abertura recebidas (``Controle.abre``).
+    """
 
     def __init__(self, roteiro, fim_s=0.3):
         self._roteiro = list(roteiro)
         self._fim = None
         self._fim_s = fim_s
         self.prazos = []
+        self.aberturas = 0
 
     def is_kernel_driver_active(self, interface):
         return False
 
     def ctrl_transfer(self, *a):
-        pass
+        self.aberturas += 1
 
     def write(self, *a):
         pass
@@ -92,6 +97,9 @@ class Adaptador(object):
         self.prazos.append(timeout)
         if self._roteiro:
             item = self._roteiro.pop(0)
+            if isinstance(item, float):
+                _DORME_DE_VERDADE(item)
+                raise NADA
             if isinstance(item, BaseException):
                 raise item
             return array("B", item)
@@ -183,7 +191,7 @@ class Runtime(object):
 
 
 def _carrega(monkeypatch, placa, adaptador, runtime=None, euid=1000, pode_desligar=True,
-             desliga_ok=True):
+             desliga_ok=True, reabre_s=999.0):
     runtime = runtime or Runtime(placa)
     # O que o programa fez para desligar o Jetson, na ordem: ("sinal", acao) e
     # ("desliga", quantas escritas a placa tinha recebido ate ali).
@@ -198,6 +206,8 @@ def _carrega(monkeypatch, placa, adaptador, runtime=None, euid=1000, pode_deslig
     monkeypatch.setattr(cm.time, "sleep", lambda s: None)   # armar o ESC, sair
     monkeypatch.setattr(cm.os, "geteuid", lambda: euid, raising=False)
     monkeypatch.setattr(cm, "DESLIGA_S", 0.05)                # segurar 3 s, encurtado
+    # Reenviar a abertura ao controle mudo: desligado, salvo nos testes dela.
+    monkeypatch.setattr(cm, "REABRE_S", reabre_s)
     monkeypatch.setattr(cm, "pode_desligar", lambda: pode_desligar)
     monkeypatch.setattr(cm, "desliga_o_jetson", lambda: runtime.eventos.append(
         ("desliga", len(placa.escritas))) or desliga_ok)
@@ -418,3 +428,73 @@ def test_a_failed_shutdown_keeps_the_program_and_ctrl_c_working(monkeypatch, cap
     assert "DESLIGAR FALHOU" in saida
     assert runtime.eventos[-1] == ("sinal", signal.SIGINT, signal.default_int_handler)
     assert codigo == 1 and "controle perdido" in saida
+
+
+# ------------------------------------------- controle ligado depois do programa
+
+def test_a_silent_controller_gets_the_opening_again(monkeypatch, capsys):
+    # Visto no carro em 2026-10-21: ligado depois do programa, o controle
+    # ficava mudo ate reiniciar o programa.
+    placa = Placa()
+    adaptador = Adaptador([], fim_s=0.3)
+    codigo, _ = _roda(monkeypatch, placa, adaptador, reabre_s=0.05)
+    assert adaptador.aberturas >= 3          # a da abertura do programa e mais
+    assert adaptador.aberturas <= 8          # uma a cada 0,05 s em 0,3 s, nao a cada giro
+    assert "reenviei a abertura" in capsys.readouterr().out
+    assert codigo == 1                        # terminou pelo fim do roteiro
+
+
+def test_after_the_opening_is_resent_the_throttle_waits_for_release(monkeypatch, capsys):
+    # O adaptador guarda o ultimo estado do controle; o que ele repete depois
+    # de uma reabertura nao foi visto. Um RT "preso" nao pode acelerar.
+    placa = Placa()
+    adaptador = Adaptador([0.1, _relatorio(rt=255)], fim_s=0.2)
+    _roda(monkeypatch, placa, adaptador, reabre_s=0.05)
+    assert ACELERADO not in [e for _, e in placa.pares()]
+    assert "PARADO" in capsys.readouterr().out
+
+
+def test_a_report_after_the_opening_is_announced(monkeypatch, capsys):
+    placa = Placa()
+    adaptador = Adaptador([0.1, _relatorio(), _relatorio(rt=255), _relatorio(), _relatorio(rt=255)],
+                          fim_s=0.05)
+    _roda(monkeypatch, placa, adaptador, reabre_s=0.05)
+    saida = capsys.readouterr().out
+    assert "controle respondeu" in saida
+    # Soltou e apertou de novo: anda.
+    assert ACELERADO in [e for _, e in placa.pares()]
+
+
+def test_during_a_run_the_opening_is_not_resent(monkeypatch, capsys):
+    # Com o controle desligado cada tentativa pode travar o laco por ate ~2 s.
+    placa = Placa()
+    adaptador = Adaptador([_relatorio(botoes=START)], fim_s=0.3)
+    _roda(monkeypatch, placa, adaptador, reabre_s=0.05)
+    assert adaptador.aberturas == 1
+
+
+def test_a_failed_reopening_does_not_end_the_program(monkeypatch, capsys):
+    class NaoResponde(Adaptador):
+        def ctrl_transfer(self, *a):
+            Adaptador.ctrl_transfer(self, *a)
+            if self.aberturas > 1:
+                raise OSError(110, "Operation timed out")
+
+    placa = Placa()
+    adaptador = NaoResponde([], fim_s=0.3)
+    codigo, _ = _roda(monkeypatch, placa, adaptador, reabre_s=0.05)
+    saida = capsys.readouterr().out
+    assert adaptador.aberturas >= 3
+    assert codigo == 1 and "controle perdido" in saida   # o fim do roteiro, nao o erro
+
+
+def test_a_controller_in_use_is_never_reopened(monkeypatch, capsys):
+    # Reabrir trava o acelerador: com alguem dirigindo, o carro pararia.
+    placa = Placa()
+    roteiro = []
+    for _ in range(15):                    # ~0,15 s falando, sem 0,1 s de silencio
+        roteiro += [_relatorio(rt=255), 0.01]
+    adaptador = Adaptador(roteiro, fim_s=0.05)
+    _roda(monkeypatch, placa, adaptador, reabre_s=0.1)
+    assert adaptador.aberturas == 1
+    assert "PARADO" not in capsys.readouterr().out

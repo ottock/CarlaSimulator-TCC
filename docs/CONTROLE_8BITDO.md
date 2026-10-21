@@ -193,8 +193,10 @@ recusa rodar como root. Ler o adaptador sem `sudo` exige a regra de permissão d
   parada de 6 cm do runtime. Para visitante dirigir, ela deveria entrar antes.
 - **Conferir o que está "a conferir" na seção 3:** A, B, Start, Back, gatilhos, analógico
   direito e o sentido dos eixos.
-- **Religar o controle depois de desligado:** os dados voltam sem reenviar os dois comandos? Só
-  testamos a volta depois do silêncio normal.
+- **Religar o controle depois de desligado:** visto em 2026-10-21 que, ligado depois do
+  programa, o controle só voltava reiniciando o programa. A hipótese é que o adaptador espera
+  a abertura de novo; o programa agora a reenvia sozinho (seção 9), e os testes 4 e 5 da seção 9
+  confirmam ou não. Ainda não isolamos qual dos dois comandos é o necessário.
 - **Regra de permissão para rodar sem `sudo`** (obrigatória: o programa recusa `sudo`, seção 6).
   Em uso no Jetson desde 2026-10-14. Depois de criá-la, é preciso tirar e recolocar o adaptador.
   ```bash
@@ -358,16 +360,33 @@ mão). Não aperte Start antes de as rodas responderem.
 3. `sudo systemctl stop carro-controle`: o journal deve terminar em
    `estado seguro. saindo: interrompido`. É a prova de que parar o serviço estaciona o carro.
 4. **Controle desligado, reinicie o Jetson**, espere uns 2 minutos e só então ligue o controle.
-   O volante responde? **Nunca testado:** até hoje o programa sempre abriu com o controle já
-   ligado, e não sabemos se os dois comandos de abertura (seção 2) precisam ser reenviados
-   quando o controle se liga depois (seção 7).
-5. Com tudo funcionando, desligue o controle (segure o Home) e ligue de novo. O volante volta a
-   responder? Na feira isso vai acontecer sozinho: o controle desliga depois de 15 minutos sem
-   uso, segundo o manual.
+   O volante deve responder em até ~3 s.
+5. Com tudo funcionando, desligue o controle (segure o Home) e ligue de novo. O volante deve
+   voltar a responder em até ~3 s. Na feira isso vai acontecer sozinho: o controle desliga
+   depois de 15 minutos sem uso, segundo o manual.
 
-Se o 4 ou o 5 falharem, o controle precisa dos comandos de abertura de novo. O contorno, até
-mudar o código, é reiniciar o programa com o controle já ligado: `sudo systemctl restart
-carro-controle`, ou desligar e religar o Jetson (pelo LB + RB, abaixo).
+**O que já foi visto (2026-10-21):** ligado depois do programa, o controle ficava mudo, e só
+reiniciando o programa ele voltava. A hipótese é que o adaptador espera os dois comandos de
+abertura (seção 2) de novo, porque reiniciar o programa é justamente reenviá-los. Desde então, **com o controle mudo por 3 s e fora de corrida, o programa reenvia a
+abertura**, e repete a cada 3 s; no journal aparece `controle mudo ha N s: reenviei a abertura`
+e, quando volta, `controle respondeu depois de reenviar a abertura`. Os testes 4 e 5 conferem
+isso no carro. Detalhes:
+
+- Depois de cada reabertura o acelerador fica **PARADO até os dois gatilhos serem soltos**,
+  como depois de um Back. O adaptador guarda o último estado do controle, e não sabemos o que
+  ele repete depois de uma reabertura: um RT "preso" não pode acelerar sozinho. Quem segurar o
+  RT parado por 3 s (o carro já parou pelo silêncio de 0,5 s) precisa soltar e apertar de novo.
+- **Na corrida não reabre:** com o controle desligado, cada tentativa pode travar o laço por até
+  ~2 s (os prazos da USB). Se o controle cair numa corrida, o Back não funciona; a corrida acaba
+  no limite de tempo (`--seconds`, padrão 60) ou na parada de fim de pista.
+- Com o controle ligado e parado, a abertura também é reenviada a cada 3 s, porque silêncio é
+  igual nos dois casos (seção 4). Não deve mudar nada; se a luz do controle piscar a cada 3 s, é
+  isso.
+
+Se mesmo assim o volante não voltar, o contorno é reiniciar o programa com o controle já ligado:
+`sudo systemctl restart carro-controle`, ou desligar e religar o Jetson (pelo LB + RB, abaixo).
+E me diga o que o journal mostrou: se aparecer `controle perdido`, o adaptador está sumindo da
+USB quando o controle liga, e isso é outro conserto.
 
 ### Desligar pelo controle: LB + RB por 3 s
 
